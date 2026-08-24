@@ -1,0 +1,21 @@
+name: crm
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: crm-postgres
+    environment:
+      POSTGRES_DB: crm_db
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: crm_secret_change_me
+    ports:
+      - "5433:5432"
+    volumes:
+      - crm_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  crm_pgdata:
+    external: true
+    # created when the project lived in ".../Default Project" - reused so no data is lost
+    name: defaultproject_crm_pgdata
