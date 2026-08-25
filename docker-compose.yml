@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: crm_db
       POSTGRES_USER: crm
-      POSTGRES_PASSWORD: crm_secret_change_me
+      POSTGRES_PASSWORD: crm@dock123
     ports:
       - "5433:5432"
     volumes:
