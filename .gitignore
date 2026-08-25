@@ -9,3 +9,4 @@ appsettings.Production.json
 .idea/
 *.log
 .DS_Store
+.claude/
