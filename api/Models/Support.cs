@@ -16,6 +16,8 @@ public class Ticket
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ResolvedAt { get; set; }
+    /// <summary>ERP build/version that fixed the issue, recorded when resolving (e.g. "v2.4.1").</summary>
+    public string? ResolvedVersion { get; set; }
 
     public ICollection<TicketComment> Comments { get; set; } = [];
 }

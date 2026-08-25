@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<TicketComment> TicketComments => Set<TicketComment>();
     public DbSet<Interaction> Interactions => Set<Interaction>();
     public DbSet<FollowUp> FollowUps => Set<FollowUp>();
+    public DbSet<ClientContact> ClientContacts => Set<ClientContact>();
     public DbSet<WhatsAppMessage> WhatsAppMessages => Set<WhatsAppMessage>();
 
     protected override void OnModelCreating(ModelBuilder mb)
@@ -43,6 +44,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.ToTable("SubscriptionPlans");
             e.Property(p => p.Name).HasMaxLength(150);
+            e.Property(p => p.Cycle).HasConversion<string>().HasMaxLength(10);
             e.Property(p => p.Price).HasColumnType("numeric(12,2)");
         });
 
@@ -50,6 +52,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.Property(s => s.Price).HasColumnType("numeric(12,2)");
             e.Property(s => s.PaymentStatus).HasConversion<string>().HasMaxLength(10);
+            e.Property(s => s.Cycle).HasConversion<string>().HasMaxLength(10);
             e.Property(s => s.PaymentMethod).HasMaxLength(50);
             e.HasIndex(s => s.ExpiryDate);
             e.HasOne(s => s.Client).WithMany(c => c.Subscriptions).HasForeignKey(s => s.ClientId).OnDelete(DeleteBehavior.Cascade);
@@ -83,10 +86,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         mb.Entity<FollowUp>(e =>
         {
             e.Property(f => f.Status).HasConversion<string>().HasMaxLength(15);
+            e.Property(f => f.Type).HasConversion<string>().HasMaxLength(12);
             e.HasIndex(f => f.ScheduledAt);
             e.HasOne(f => f.Client).WithMany(c => c.FollowUps).HasForeignKey(f => f.ClientId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(f => f.AssignedTo).WithMany().HasForeignKey(f => f.AssignedToId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(f => f.SourceInteraction).WithMany().HasForeignKey(f => f.SourceInteractionId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(f => f.Ticket).WithMany().HasForeignKey(f => f.TicketId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        mb.Entity<ClientContact>(e =>
+        {
+            e.ToTable("ClientContacts");
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Phone).HasMaxLength(30);
+            e.Property(x => x.Email).HasMaxLength(320);
+            e.HasIndex(x => x.ClientId);
+            e.HasOne(x => x.Client).WithMany(c => c.Contacts).HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
         });
 
         mb.Entity<WhatsAppMessage>(e =>

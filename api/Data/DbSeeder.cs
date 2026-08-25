@@ -18,10 +18,11 @@ public static class DbSeeder
         db.Users.Add(admin);
         db.SaveChanges();
 
-        var basic = new SubscriptionPlan { Name = "Basic - 1 Year", DurationDays = 365, Price = 1000m };
-        var pro = new SubscriptionPlan { Name = "Pro - 1 Year", DurationDays = 365, Price = 2000m };
-        var premium = new SubscriptionPlan { Name = "Premium - 1 Year + Priority Support", DurationDays = 365, Price = 3500m };
-        db.Plans.AddRange(basic, pro, premium);
+        var basicYearly = new SubscriptionPlan { Name = "Basic - 1 Year", Cycle = BillingCycle.Yearly, Price = 1000m };
+        var proYearly = new SubscriptionPlan { Name = "Pro - 1 Year", Cycle = BillingCycle.Yearly, Price = 2000m };
+        var premiumYearly = new SubscriptionPlan { Name = "Premium - 1 Year + Priority Support", Cycle = BillingCycle.Yearly, Price = 3500m };
+        var basicMonthly = new SubscriptionPlan { Name = "Basic - Monthly", Cycle = BillingCycle.Monthly, Price = 120m };
+        db.Plans.AddRange(basicYearly, proYearly, premiumYearly, basicMonthly);
         db.SaveChanges();
 
         var today = DateTime.Today;
@@ -61,13 +62,35 @@ public static class DbSeeder
         db.Clients.AddRange(pharmacy, gift, clinic);
         db.SaveChanges();
 
+        // secondary contact persons (opt-in WhatsApp fan-out demo)
+        db.ClientContacts.AddRange(
+            new ClientContact
+            {
+                Client = pharmacy,
+                Name = "Khaled Mansour",
+                Phone = "+201005554433",
+                Email = "khaled@alshifa.example",
+                Notes = "Pharmacist on duty, handles license renewals.",
+                AllowWhatsApp = true
+            },
+            new ClientContact
+            {
+                Client = pharmacy,
+                Name = "Nour El-Sayed",
+                Phone = "+201009998877",
+                Notes = "Accountant - payments only, no notifications.",
+                AllowWhatsApp = false
+            });
+        db.SaveChanges();
+
         var sub = new Subscription
         {
             Client = pharmacy,
-            Plan = basic,
+            Plan = basicYearly,
+            Cycle = BillingCycle.Yearly,
             StartDate = today.AddDays(-358),
             ExpiryDate = today.AddDays(7),
-            Price = basic.Price,
+            Price = basicYearly.Price,
             PaymentStatus = PaymentStatus.Unpaid
         };
         db.Subscriptions.Add(sub);
@@ -97,6 +120,7 @@ public static class DbSeeder
             {
                 Client = gift,
                 Title = "Send pricing sheet & confirm interest",
+                Type = FollowUpType.Marketing,
                 ScheduledAt = DateTime.Today.AddDays(3).AddHours(11),
                 AssignedToId = admin.Id,
                 CreatedById = admin.Id
@@ -105,18 +129,33 @@ public static class DbSeeder
             {
                 Client = clinic,
                 Title = "First contact call",
+                Type = FollowUpType.Marketing,
                 ScheduledAt = DateTime.Today.AddHours(2),
                 AssignedToId = admin.Id,
                 CreatedById = admin.Id
             });
 
-        db.Tickets.Add(new Ticket
+        var ticket = new Ticket
         {
             Client = pharmacy,
             Title = "Barcode printer not printing invoices",
             Description = "Printer works in test page but not from invoice screen.",
             Priority = TicketPriority.High,
             Status = TicketStatus.Open,
+            CreatedById = admin.Id
+        };
+        db.Tickets.Add(ticket);
+        db.SaveChanges();
+
+        db.FollowUps.Add(new FollowUp
+        {
+            Client = pharmacy,
+            Title = "Check ticket fix with client",
+            Description = $"Verify invoice printing after build v2.4.1 update (ticket #{ticket.Id}).",
+            Type = FollowUpType.Support,
+            TicketId = ticket.Id,
+            ScheduledAt = DateTime.Today.AddDays(1).AddHours(14),
+            AssignedToId = admin.Id,
             CreatedById = admin.Id
         });
 

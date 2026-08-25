@@ -77,6 +77,8 @@ public class ClientsController(AppDbContext db) : ControllerBase
         var client = await db.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
         if (client is null) return NotFound();
 
+        var contacts = await db.ClientContacts.AsNoTracking()
+            .Where(x => x.ClientId == id).OrderBy(x => x.Name).ToListAsync();
         var subs = await db.Subscriptions.AsNoTracking()
             .Include(x => x.Plan).Include(x => x.Client)
             .Where(x => x.ClientId == id).OrderByDescending(x => x.StartDate).ToListAsync();
@@ -87,16 +89,76 @@ public class ClientsController(AppDbContext db) : ControllerBase
             .Include(x => x.Client).Include(x => x.AssignedTo).Include(x => x.CreatedBy)
             .Where(x => x.ClientId == id).OrderByDescending(x => x.UpdatedAt).ToListAsync();
         var followUps = await db.FollowUps.AsNoTracking()
-            .Include(x => x.Client).Include(x => x.AssignedTo)
+            .Include(x => x.Client).Include(x => x.AssignedTo).Include(x => x.Ticket)
             .Where(x => x.ClientId == id).OrderByDescending(x => x.ScheduledAt).Take(50).ToListAsync();
 
         return Ok(new ClientDetailDto(
             client.Id, client.Name, client.ContactPerson, client.Phone, client.Email,
             client.Address, client.City, client.Type.ToString(), client.Status.ToString(), client.Notes, client.CreatedAt,
+            contacts.Select(c => c.ToDto()).ToList(),
+            subs.Where(s => s.PaidAt is not null).OrderByDescending(s => s.PaidAt)
+                .Select(s => s.ToPaymentDto()).ToList(),
             subs.Select(Mappers.ToDto).ToList(),
             interactions.Select(Mappers.ToDto).ToList(),
             tickets.Select(t => t.ToDto()).ToList(),
             followUps.Select(Mappers.ToDto).ToList()));
+    }
+
+    // ---------- secondary contacts ----------
+
+    /// <summary>Secondary contact persons; those with AllowWhatsApp also receive notifications.</summary>
+    [HttpGet("{id:int}/contacts")]
+    public async Task<ActionResult<IReadOnlyList<ClientContactDto>>> GetContacts(int id)
+    {
+        if (!await db.Clients.AnyAsync(c => c.Id == id)) return NotFound();
+        var contacts = await db.ClientContacts.AsNoTracking()
+            .Where(x => x.ClientId == id).OrderBy(x => x.Name).ToListAsync();
+        return Ok(contacts.Select(c => c.ToDto()).ToList());
+    }
+
+    [HttpPost("{id:int}/contacts")]
+    public async Task<ActionResult<ClientContactDto>> AddContact(int id, SaveClientContactRequest request)
+    {
+        var client = await db.Clients.FindAsync(id);
+        if (client is null) return NotFound();
+
+        var contact = new ClientContact
+        {
+            ClientId = id,
+            Name = request.Name.Trim(),
+            Phone = request.Phone.Trim(),
+            Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim(),
+            Notes = request.Notes,
+            AllowWhatsApp = request.AllowWhatsApp
+        };
+        db.ClientContacts.Add(contact);
+        await db.SaveChangesAsync();
+        return CreatedAtAction(nameof(GetContacts), new { id }, contact.ToDto());
+    }
+
+    [HttpPut("{id:int}/contacts/{contactId:int}")]
+    public async Task<IActionResult> UpdateContact(int id, int contactId, SaveClientContactRequest request)
+    {
+        var contact = await db.ClientContacts.FirstOrDefaultAsync(x => x.Id == contactId && x.ClientId == id);
+        if (contact is null) return NotFound();
+
+        contact.Name = request.Name.Trim();
+        contact.Phone = request.Phone.Trim();
+        contact.Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim();
+        contact.Notes = request.Notes;
+        contact.AllowWhatsApp = request.AllowWhatsApp;
+        await db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpDelete("{id:int}/contacts/{contactId:int}")]
+    public async Task<IActionResult> DeleteContact(int id, int contactId)
+    {
+        var contact = await db.ClientContacts.FirstOrDefaultAsync(x => x.Id == contactId && x.ClientId == id);
+        if (contact is null) return NotFound();
+        db.ClientContacts.Remove(contact);
+        await db.SaveChangesAsync();
+        return NoContent();
     }
 
     [HttpPost]

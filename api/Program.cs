@@ -69,11 +69,35 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// create database + seed demo data on first run
+// migrate database + seed demo data on first run
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
+
+    // Databases created earlier via EnsureCreated lack the migrations history table.
+    // Create it, then baseline legacy schemas at the initial migration so Migrate()
+    // adopts them as-is and only applies newer deltas - no data loss.
+    db.Database.ExecuteSqlRaw("""
+        CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
+            "MigrationId" character varying(150) NOT NULL,
+            "ProductVersion" character varying(32) NOT NULL,
+            CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId"));
+        """);
+    var hasLegacySchema = db.Database
+        .SqlQuery<int>($"SELECT COUNT(*)::int AS \"Value\" FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'Users'")
+        .AsEnumerable().First() > 0;
+    var hasAnyApplied = db.Database
+        .SqlQuery<int>($"SELECT COUNT(*)::int AS \"Value\" FROM \"__EFMigrationsHistory\"")
+        .AsEnumerable().First() > 0;
+    if (hasLegacySchema && !hasAnyApplied)
+    {
+        var firstPending = db.Database.GetPendingMigrations().First();
+        var efVersion = typeof(DbContext).Assembly.GetName().Version!.ToString(3);
+        db.Database.ExecuteSqlRaw(
+            $"INSERT INTO \"__EFMigrationsHistory\" (\"MigrationId\", \"ProductVersion\") VALUES ('{firstPending}', '{efVersion}')");
+    }
+
+    db.Database.Migrate();
     DbSeeder.Seed(db);
 }
 

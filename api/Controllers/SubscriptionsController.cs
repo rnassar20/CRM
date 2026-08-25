@@ -74,8 +74,9 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
         {
             ClientId = client.Id,
             PlanId = plan.Id,
+            Cycle = plan.Cycle,
             StartDate = start,
-            ExpiryDate = start.AddDays(plan.DurationDays),
+            ExpiryDate = start.AddCycle(plan.Cycle),
             Price = request.Price ?? plan.Price,
             Notes = request.Notes,
             PaymentStatus = PaymentStatus.Unpaid
@@ -130,16 +131,13 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
             ?? "Thank you {client}! Your payment for {plan} is confirmed. Activation key:\n{key}\nOpen your ERP > Help > Activate Subscription and enter this key. Licensed until {expiry}.";
         var body = template
             .Replace("{client}", sub.Client.Name)
-            .Replace("{contact}", sub.Client.ContactPerson)
             .Replace("{plan}", sub.Plan.Name)
             .Replace("{key}", key)
             .Replace("{expiry}", sub.ExpiryDate.ToString("yyyy-MM-dd"));
 
-        WhatsAppMessage? msg = null;
-        if (!string.IsNullOrWhiteSpace(sub.Client.Phone))
-            msg = await ReminderWorker.QueueAndSendAsync(db, sender, sub.Client.Phone, body, sub.ClientId, sub.Id, $"license-{sub.Id}", HttpContext.RequestAborted);
+        var (sent, status) = await SendToRecipientsAsync(sub, body, $"license-{sub.Id}", HttpContext.RequestAborted);
 
-        return Ok(new { subscription = sub.ToDto(), whatsappStatus = msg?.Status.ToString() ?? "Skipped", licenseKey = key });
+        return Ok(new { subscription = sub.ToDto(), whatsappStatus = status, licenseKey = key });
     }
 
     /// <summary>Re-delivers the existing activation key (same key, no regeneration).</summary>
@@ -147,17 +145,34 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
     public async Task<ActionResult<object>> ResendKey(int id)
     {
         var sub = await db.Subscriptions
-            .Include(s => s.Client).Include(s => s.Plan)
+            .Include(s => s.Client).ThenInclude(c => c.Contacts).Include(s => s.Plan)
             .FirstOrDefaultAsync(s => s.Id == id);
         if (sub is null) return NotFound();
         if (sub.LicenseKey is null) return BadRequest("No key issued yet. Mark the subscription as paid first.");
 
-        var body = $"Hi {sub.Client.ContactPerson}, your ERP activation key:\n{sub.LicenseKey}\nValid until {sub.ExpiryDate:yyyy-MM-dd}.";
-        WhatsAppMessage? msg = null;
-        if (!string.IsNullOrWhiteSpace(sub.Client.Phone))
-            msg = await ReminderWorker.QueueAndSendAsync(db, sender, sub.Client.Phone, body, sub.ClientId, sub.Id, $"license-resend-{Guid.NewGuid():N}", HttpContext.RequestAborted);
+        var body = $"Hi {{contact}}, your ERP activation key:\n{sub.LicenseKey}\nValid until {sub.ExpiryDate:yyyy-MM-dd}.";
+        var (_, status) = await SendToRecipientsAsync(sub, body, $"license-resend-{Guid.NewGuid():N}", HttpContext.RequestAborted);
 
-        return Ok(new { sent = msg != null, status = msg?.Status.ToString() ?? "Skipped" });
+        return Ok(new { sent = status != "Skipped", status });
+    }
+
+    /// <summary>Sends a pre-formatted body to the primary contact plus every opted-in client contact.</summary>
+    private async Task<(int Sent, string Status)> SendToRecipientsAsync(Subscription sub, string bodyTemplate, string tag, CancellationToken ct)
+    {
+        var recipients = ReminderWorker.Recipients(sub.Client).ToList();
+        if (recipients.Count == 0) return (0, "Skipped");
+
+        var sent = 0;
+        WhatsAppStatus last = WhatsAppStatus.Failed;
+        foreach (var (phone, name) in recipients)
+        {
+            var body = name is null ? bodyTemplate : bodyTemplate.Replace("{contact}", name);
+            var msg = await ReminderWorker.QueueAndSendAsync(db, sender, phone, body, sub.ClientId, sub.Id, tag, ct);
+            if (msg.Status == WhatsAppStatus.Sent) sent++;
+            last = msg.Status;
+        }
+        var who = recipients.Count == 1 ? "1 recipient" : $"{recipients.Count} recipients";
+        return (sent, sent == 0 ? $"Failed ({who})" : $"Sent to {sent}/{who} ({last})");
     }
 
     /// <summary>Offline validation endpoint - mirrors what the desktop ERP does with a entered key.</summary>
@@ -180,3 +195,10 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
 }
 
 public record ValidateKeyRequest(string Key);
+
+public static class SubscriptionExtensions
+{
+    /// <summary>Calendar-accurate period end: monthly = +1 month, yearly = +1 year.</summary>
+    public static DateTime AddCycle(this DateTime start, BillingCycle cycle) =>
+        cycle == BillingCycle.Yearly ? start.AddYears(1) : start.AddMonths(1);
+}

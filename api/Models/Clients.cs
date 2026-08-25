@@ -20,4 +20,20 @@ public class Client
     public ICollection<Interaction> Interactions { get; set; } = [];
     public ICollection<Ticket> Tickets { get; set; } = [];
     public ICollection<FollowUp> FollowUps { get; set; } = [];
+    public ICollection<ClientContact> Contacts { get; set; } = [];
+}
+
+/// <summary>A secondary contact person of a client (accountant, pharmacist, owner...).</summary>
+public class ClientContact
+{
+    public int Id { get; set; }
+    public int ClientId { get; set; }
+    public Client Client { get; set; } = null!;
+    public string Name { get; set; } = "";
+    public string Phone { get; set; } = "";
+    public string? Email { get; set; }
+    public string? Notes { get; set; }
+    /// <summary>If true, subscription reminders/license deliveries also go to this person.</summary>
+    public bool AllowWhatsApp { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

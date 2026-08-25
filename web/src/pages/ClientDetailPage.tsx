@@ -7,10 +7,13 @@ import {
   fmtDate,
   fmtDateTime,
   toLocalInputPlusDays,
+  type ClientContact,
   type ClientType,
   type ClientStatus,
+  type FollowUpType,
   type InteractionOutcome,
   type InteractionType,
+  type PaymentInfo,
   type PlanDto,
   type SubscriptionDto,
 } from '../types'
@@ -32,6 +35,8 @@ type ClientDetail = {
   status: ClientStatus
   notes: string | null
   createdAt: string
+  contacts: ClientContact[]
+  payments: PaymentInfo[]
   subscriptions: SubscriptionDto[]
   interactions: import('../types').InteractionDto[]
   tickets: import('../types').TicketDto[]
@@ -43,7 +48,7 @@ export default function ClientDetailPage() {
   const [client, setClient] = useState<ClientDetail | null>(null)
   const [plans, setPlans] = useState<PlanDto[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'interactions' | 'agenda' | 'subscriptions' | 'tickets'>('interactions')
+  const [tab, setTab] = useState<'interactions' | 'agenda' | 'subscriptions' | 'payments' | 'contacts' | 'tickets'>('interactions')
 
   const load = useCallback(async () => {
     try {
@@ -79,11 +84,13 @@ export default function ClientDetailPage() {
       </div>
 
       <div className="tabs">
-        {(['interactions', 'agenda', 'subscriptions', 'tickets'] as const).map((t) => (
+        {(['interactions', 'agenda', 'subscriptions', 'payments', 'contacts', 'tickets'] as const).map((t) => (
           <button key={t} className={`tab ${tab === t ? 'tab-active' : ''}`} onClick={() => setTab(t)}>
             {t === 'interactions' ? `Call log (${client.interactions.length})` : t.charAt(0).toUpperCase() + t.slice(1)}
             {t === 'agenda' && ` (${client.followUps.length})`}
             {t === 'subscriptions' && ` (${client.subscriptions.length})`}
+            {t === 'payments' && ` (${client.payments.length})`}
+            {t === 'contacts' && ` (${client.contacts.length})`}
             {t === 'tickets' && ` (${client.tickets.length})`}
           </button>
         ))}
@@ -92,6 +99,8 @@ export default function ClientDetailPage() {
       {tab === 'interactions' && <InteractionsTab client={client} reload={load} />}
       {tab === 'agenda' && <AgendaTab client={client} reload={load} />}
       {tab === 'subscriptions' && <SubscriptionsTab client={client} plans={plans} reload={load} />}
+      {tab === 'payments' && <PaymentsTab client={client} />}
+      {tab === 'contacts' && <ContactsTab client={client} reload={load} />}
       {tab === 'tickets' && <TicketsTab client={client} />}
     </>
   )
@@ -214,11 +223,18 @@ function InteractionsTab({ client, reload }: { client: ClientDetail; reload: () 
 /* ---------------- Agenda ---------------- */
 
 function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => void }) {
-  const [form, setForm] = useState({ title: '', description: '', scheduledAt: toLocalInputPlusDays(1) })
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    scheduledAt: toLocalInputPlusDays(1),
+    type: 'Marketing' as FollowUpType,
+    ticketId: '',
+  })
   const [error, setError] = useState<string | null>(null)
 
   async function submit(e: FormEvent) {
     e.preventDefault()
+    if (form.type === 'Support' && !form.ticketId) return setError('Support follow-ups need a ticket.')
     setError(null)
     try {
       await api.post('/followups', {
@@ -226,8 +242,10 @@ function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => voi
         title: form.title,
         description: form.description || null,
         scheduledAt: new Date(form.scheduledAt).toISOString(),
+        type: form.type,
+        ticketId: form.type === 'Support' && form.ticketId ? Number(form.ticketId) : null,
       })
-      setForm({ title: '', description: '', scheduledAt: toLocalInputPlusDays(1) })
+      setForm({ ...form, title: '', description: '', ticketId: '' })
       reload()
     } catch (err) {
       setError(errMsg(err))
@@ -247,6 +265,9 @@ function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => voi
     <>
       <section className="card">
         <h2>Schedule follow-up</h2>
+        <p className="muted small">
+          Marketing = sales/outreach · Internal = build/version work · Support = linked to one of this client's tickets.
+        </p>
         <form onSubmit={submit} className="form-grid form-grid-4">
           <Field label="Title *">
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
@@ -259,8 +280,26 @@ function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => voi
               required
             />
           </Field>
+          <Field label="Type">
+            <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as FollowUpType })}>
+              {(['Marketing', 'Internal', 'Support'] as FollowUpType[]).map((t) => (
+                <option key={t}>{t}{t === 'Internal' ? ' (build/version)' : t === 'Support' ? ' (ticket)' : ''}</option>
+              ))}
+            </select>
+          </Field>
+          {form.type === 'Support' && (
+            <Field label="Ticket *">
+              <select value={form.ticketId} onChange={(e) => setForm({ ...form, ticketId: e.target.value })}>
+                <option value="">— select ticket —</option>
+                {client.tickets.map((t) => (
+                  <option key={t.id} value={t.id}>#{t.id} · {t.title} ({t.status})</option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Description">
-            <textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            <textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder={form.type === 'Internal' ? 'Build/version notes…' : undefined} />
           </Field>
           {error && <ErrorBox message={error} />}
           <div className="modal-actions">
@@ -279,6 +318,7 @@ function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => voi
               <tr>
                 <th>When</th>
                 <th>Title</th>
+                <th>Type</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -289,8 +329,10 @@ function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => voi
                   <td className="nowrap">{fmtDateTime(f.scheduledAt)}</td>
                   <td className="wrap">
                     {f.title}
+                    {f.ticketId && <span className="muted small"> · ticket #{f.ticketId}</span>}
                     {f.description && <div className="muted small">{f.description}</div>}
                   </td>
+                  <td><span className="badge badge-gray">{f.type}</span></td>
                   <td><Badge value={f.status} /></td>
                   <td className="nowrap">
                     {f.status === 'Pending' && (
@@ -299,6 +341,189 @@ function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => voi
                         <button className="btn btn-small" onClick={() => act(f.id, 'cancel')}>Cancel</button>
                       </>
                     )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </>
+  )
+}
+
+/* ---------------- Payment history ---------------- */
+
+function PaymentsTab({ client }: { client: ClientDetail }) {
+  return client.payments.length === 0 ? (
+    <Empty text="No payments recorded yet. Mark a subscription as paid to build the history." />
+  ) : (
+    <>
+      <div className="page-head">
+        <h2 style={{ margin: 0 }}>Payment history</h2>
+        <span className="muted">
+          Total collected:{' '}
+          <strong>{client.payments.reduce((sum, p) => sum + Number(p.amount), 0).toLocaleString()}</strong>
+        </span>
+      </div>
+      <table className="table card">
+        <thead>
+          <tr>
+            <th>Paid at</th>
+            <th>Plan</th>
+            <th>Cycle</th>
+            <th>Period</th>
+            <th>Amount</th>
+            <th>Method</th>
+            <th>License key</th>
+          </tr>
+        </thead>
+        <tbody>
+          {client.payments.map((p) => (
+            <tr key={p.subscriptionId}>
+              <td className="nowrap strong">{fmtDateTime(p.paidAt)}</td>
+              <td>{p.planName}</td>
+              <td><span className="badge badge-gray">{p.cycle}</span></td>
+              <td className="nowrap">{fmtDate(p.startDate)} → {fmtDate(p.expiryDate)}</td>
+              <td className="strong">{Number(p.amount).toLocaleString()}</td>
+              <td>{p.paymentMethod ?? '-'}</td>
+              <td className="mono small wrap">{p.licenseKey ?? '-'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  )
+}
+
+/* ---------------- Secondary contacts ---------------- */
+
+type ContactForm = { name: string; phone: string; email: string; notes: string; allowWhatsApp: boolean }
+const EMPTY_CONTACT: ContactForm = { name: '', phone: '', email: '', notes: '', allowWhatsApp: false }
+
+function ContactsTab({ client, reload }: { client: ClientDetail; reload: () => void }) {
+  const [form, setForm] = useState<ContactForm>(EMPTY_CONTACT)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    const payload = { ...form, email: form.email || null }
+    try {
+      if (editingId) {
+        await api.put(`/clients/${client.id}/contacts/${editingId}`, payload)
+      } else {
+        await api.post(`/clients/${client.id}/contacts`, payload)
+      }
+      setForm(EMPTY_CONTACT)
+      setEditingId(null)
+      reload()
+    } catch (err) {
+      setError(errMsg(err))
+    }
+  }
+
+  async function remove(id: number) {
+    try {
+      await api.delete(`/clients/${client.id}/contacts/${id}`)
+      if (editingId === id) { setEditingId(null); setForm(EMPTY_CONTACT) }
+      reload()
+    } catch (err) {
+      setError(errMsg(err))
+    }
+  }
+
+  async function toggleWhatsApp(c: ClientContact) {
+    try {
+      await api.put(`/clients/${client.id}/contacts/${c.id}`, {
+        name: c.name,
+        phone: c.phone,
+        email: c.email,
+        notes: c.notes,
+        allowWhatsApp: !c.allowWhatsApp,
+      })
+      reload()
+    } catch (err) {
+      setError(errMsg(err))
+    }
+  }
+
+  function startEdit(c: ClientContact) {
+    setEditingId(c.id)
+    setForm({ name: c.name, phone: c.phone, email: c.email ?? '', notes: c.notes ?? '', allowWhatsApp: c.allowWhatsApp })
+  }
+
+  return (
+    <>
+      <section className="card">
+        <h2>{editingId ? 'Edit contact' : 'Add secondary contact'}</h2>
+        <p className="muted small">Contacts with "send WhatsApp" checked also receive expiry reminders and license keys.</p>
+        <form onSubmit={submit} className="form-grid form-grid-4">
+          <Field label="Name *">
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          </Field>
+          <Field label="Phone *">
+            <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} required placeholder="+20…" />
+          </Field>
+          <Field label="Email">
+            <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </Field>
+          <Field label="Notes">
+            <input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="e.g. accountant, pharmacist…" />
+          </Field>
+          <label className="check" style={{ alignSelf: 'center' }}>
+            <input
+              type="checkbox"
+              checked={form.allowWhatsApp}
+              onChange={(e) => setForm({ ...form, allowWhatsApp: e.target.checked })}
+            />
+            Send WhatsApp notifications
+          </label>
+          {error && <ErrorBox message={error} />}
+          <div className="modal-actions">
+            {editingId && (
+              <button type="button" className="btn" onClick={() => { setEditingId(null); setForm(EMPTY_CONTACT) }}>
+                Cancel edit
+              </button>
+            )}
+            <button className="btn btn-primary">{editingId ? 'Save changes' : 'Add contact'}</button>
+          </div>
+        </form>
+      </section>
+
+      <section className="card">
+        <h2>Contact persons ({client.contacts.length})</h2>
+        {client.contacts.length === 0 ? (
+          <Empty text="No secondary contacts yet." />
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Notes</th>
+                <th>WhatsApp</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {client.contacts.map((c) => (
+                <tr key={c.id}>
+                  <td className="strong">{c.name}</td>
+                  <td className="nowrap">{c.phone}</td>
+                  <td>{c.email ?? '-'}</td>
+                  <td className="wrap">{c.notes}</td>
+                  <td>
+                    <label className="check" title="Toggle WhatsApp notifications for this contact">
+                      <input type="checkbox" checked={c.allowWhatsApp} onChange={() => toggleWhatsApp(c)} />
+                      {c.allowWhatsApp ? 'receives' : 'off'}
+                    </label>
+                  </td>
+                  <td className="nowrap">
+                    <button className="btn btn-small" onClick={() => startEdit(c)}>✎ Edit</button>{' '}
+                    <button className="btn btn-small" onClick={() => remove(c.id)}>Delete</button>
                   </td>
                 </tr>
               ))}
@@ -466,7 +691,7 @@ function NewSubscriptionModal({
           <select value={planId} onChange={(e) => setPlanId(Number(e.target.value))}>
             {plans.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name} ({p.durationDays}d)
+                {p.name} ({p.cycle})
               </option>
             ))}
           </select>

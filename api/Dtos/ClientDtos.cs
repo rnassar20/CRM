@@ -12,10 +12,22 @@ public record ClientDetailDto(
     int Id, string Name, string ContactPerson, string Phone, string? Email,
     string? Address, string? City, string Type, string Status, string? Notes,
     DateTime CreatedAt,
+    IReadOnlyList<ClientContactDto> Contacts,
+    IReadOnlyList<PaymentDto> Payments,
     IReadOnlyList<SubscriptionDto> Subscriptions,
     IReadOnlyList<InteractionDto> Interactions,
     IReadOnlyList<TicketDto> Tickets,
     IReadOnlyList<FollowUpDto> FollowUps);
+
+public record ClientContactDto(
+    int Id, int ClientId, string Name, string Phone, string? Email, string? Notes, bool AllowWhatsApp);
+
+public record SaveClientContactRequest(
+    [Required, MaxLength(200)] string Name,
+    [Required, Phone, MaxLength(30)] string Phone,
+    [EmailAddress] string? Email,
+    string? Notes,
+    bool AllowWhatsApp = false);
 
 public record CreateClientRequest(
     [Required, MaxLength(200)] string Name,

@@ -52,9 +52,9 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
 
         // ---- subscription expiry reminders ----
         var activeSubs = await db.Subscriptions
-            .Include(s => s.Client)
+            .Include(s => s.Client).ThenInclude(c => c.Contacts)
             .Include(s => s.Plan)
-            .Where(s => s.ExpiryDate >= today && s.Client.Phone != "")
+            .Where(s => s.ExpiryDate >= today)
             .ToListAsync(ct);
 
         foreach (var sub in activeSubs)
@@ -63,17 +63,22 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
             if (!ReminderDays.Contains(daysLeft)) continue;
 
             var tag = $"expiry-{daysLeft}";
-            var already = await db.WhatsAppMessages.AnyAsync(m => m.SubscriptionId == sub.Id && m.RelatedTag == tag, ct);
-            if (already) continue;
-
             var body = expiryTemplate
                 .Replace("{client}", sub.Client.Name)
-                .Replace("{contact}", sub.Client.ContactPerson)
                 .Replace("{plan}", sub.Plan.Name)
                 .Replace("{expiry}", sub.ExpiryDate.ToString("yyyy-MM-dd"))
                 .Replace("{days}", daysLeft.ToString());
 
-            await QueueAndSendAsync(db, sender, sub.Client.Phone, body, sub.ClientId, sub.Id, tag, ct);
+            // primary contact + every opted-in secondary contact; dedupe per recipient
+            foreach (var (phone, name) in Recipients(sub.Client))
+            {
+                var already = await db.WhatsAppMessages.AnyAsync(
+                    m => m.SubscriptionId == sub.Id && m.RelatedTag == tag && m.ToPhone == phone, ct);
+                if (already) continue;
+
+                var personalized = name is null ? body : body.Replace("{contact}", name);
+                await QueueAndSendAsync(db, sender, phone, personalized, sub.ClientId, sub.Id, tag, ct);
+            }
         }
 
         // ---- follow-up reminders (internal flag; visible on dashboard/agenda) ----
@@ -92,6 +97,22 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
             fu.Status = FollowUpStatus.Missed;
 
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Everyone who should receive a client's WhatsApp notifications: the primary contact plus
+    /// every secondary contact flagged AllowWhatsApp. Deduplicated by phone number.
+    /// </summary>
+    public static IEnumerable<(string Phone, string? Name)> Recipients(Client client)
+    {
+        if (!string.IsNullOrWhiteSpace(client.Phone))
+            yield return (client.Phone.Trim(), null);
+
+        foreach (var c in client.Contacts)
+        {
+            if (c.AllowWhatsApp && !string.IsNullOrWhiteSpace(c.Phone))
+                yield return (c.Phone.Trim(), c.Name);
+        }
     }
 
     /// <summary>Queues a WhatsApp message row then sends it through the configured provider. Shared by workers and controllers.</summary>

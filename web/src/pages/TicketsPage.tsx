@@ -81,6 +81,7 @@ export default function TicketsPage() {
                   <th>Client</th>
                   <th>Priority</th>
                   <th>Status</th>
+                  <th>Fixed in</th>
                   <th>Assigned</th>
                   <th>Updated</th>
                 </tr>
@@ -93,6 +94,7 @@ export default function TicketsPage() {
                     <td>{t.clientName}</td>
                     <td><Badge value={t.priority} /></td>
                     <td><Badge value={t.status} /></td>
+                    <td className="mono">{t.resolvedVersion ?? '-'}</td>
                     <td>{t.assignedToName ?? <span className="muted">unassigned</span>}</td>
                     <td className="nowrap">{fmtDateTime(t.updatedAt)}</td>
                   </tr>
@@ -191,6 +193,7 @@ function TicketDetailModal({ ticketId, agents, onClose, onChanged }: { ticketId:
   const [comments, setComments] = useState<TicketCommentDto[]>([])
   const [comment, setComment] = useState('')
   const [isInternal, setIsInternal] = useState(false)
+  const [version, setVersion] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -198,6 +201,7 @@ function TicketDetailModal({ ticketId, agents, onClose, onChanged }: { ticketId:
       const res = await api.get(`/tickets/${ticketId}`)
       setTicket(res.data.ticket)
       setComments(res.data.comments)
+      setVersion(res.data.ticket.resolvedVersion ?? '')
     } catch (e) {
       setError(errMsg(e))
     }
@@ -263,6 +267,27 @@ function TicketDetailModal({ ticketId, agents, onClose, onChanged }: { ticketId:
           </select>
         </Field>
       </div>
+
+      {(ticket.status === 'Resolved' || ticket.status === 'Closed' || ticket.resolvedVersion) && (
+        <div className="grid-2" style={{ marginTop: '0.5rem' }}>
+          <Field label="Fixed in ERP build/version (recorded with the resolution)">
+            <input
+              placeholder="e.g. v2.4.1"
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+            />
+          </Field>
+          <div style={{ alignSelf: 'end' }}>
+            <button
+              className="btn btn-small btn-primary"
+              onClick={() => patch({ resolvedVersion: version })}
+              type="button"
+            >
+              Save version
+            </button>
+          </div>
+        </div>
+      )}
 
       <h3>Comments ({comments.length})</h3>
       <div className="comments">

@@ -21,14 +21,21 @@ public class PlansController(AppDbContext db) : ControllerBase
         return Ok(plans.Select(Mappers.ToDto).ToList());
     }
 
+    private static BillingCycle? ParseCycle(string value)
+        => Enum.TryParse<BillingCycle>(value, true, out var c) ? c : null;
+
     [HttpPost]
     [Authorize(Roles = "Admin")]
     public async Task<ActionResult<PlanDto>> Create(SavePlanRequest request)
     {
+        var cycle = ParseCycle(request.Cycle);
+        if (cycle is null)
+            return BadRequest($"Unknown cycle '{request.Cycle}'. Allowed: {string.Join(", ", Enum.GetNames<BillingCycle>())}.");
+
         var plan = new SubscriptionPlan
         {
             Name = request.Name.Trim(),
-            DurationDays = request.DurationDays,
+            Cycle = cycle.Value,
             Price = request.Price,
             IsActive = request.IsActive
         };
@@ -44,8 +51,12 @@ public class PlansController(AppDbContext db) : ControllerBase
         var plan = await db.Plans.FindAsync(id);
         if (plan is null) return NotFound();
 
+        var cycle = ParseCycle(request.Cycle);
+        if (cycle is null)
+            return BadRequest($"Unknown cycle '{request.Cycle}'. Allowed: {string.Join(", ", Enum.GetNames<BillingCycle>())}.");
+
         plan.Name = request.Name.Trim();
-        plan.DurationDays = request.DurationDays;
+        plan.Cycle = cycle.Value;
         plan.Price = request.Price;
         plan.IsActive = request.IsActive;
         await db.SaveChangesAsync();

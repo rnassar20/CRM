@@ -13,6 +13,8 @@ export type InteractionOutcome =
   | 'DealClosed'
   | 'InfoOnly'
 export type FollowUpStatus = 'Pending' | 'Done' | 'Missed' | 'Cancelled'
+export type FollowUpType = 'Marketing' | 'Internal' | 'Support'
+export type BillingCycle = 'Monthly' | 'Yearly'
 
 export interface UserDto {
   id: number
@@ -64,6 +66,7 @@ export interface SubscriptionDto {
   clientPhone: string
   planId: number
   planName: string
+  cycle: BillingCycle
   startDate: string
   expiryDate: string
   price: number
@@ -76,10 +79,34 @@ export interface SubscriptionDto {
   createdAt: string
 }
 
+/** one payment-history row (a paid subscription period) */
+export interface PaymentInfo {
+  subscriptionId: number
+  planName: string
+  cycle: BillingCycle
+  startDate: string
+  expiryDate: string
+  amount: number
+  paymentMethod: string | null
+  paidAt: string
+  licenseKey: string | null
+}
+
+/** secondary contact person of a client */
+export interface ClientContact {
+  id: number
+  clientId: number
+  name: string
+  phone: string
+  email: string | null
+  notes: string | null
+  allowWhatsApp: boolean
+}
+
 export interface PlanDto {
   id: number
   name: string
-  durationDays: number
+  cycle: BillingCycle
   price: number
   isActive: boolean
 }
@@ -103,6 +130,9 @@ export interface FollowUpDto {
   clientName: string
   title: string
   description: string | null
+  type: FollowUpType
+  ticketId: number | null
+  ticketTitle: string | null
   scheduledAt: string
   status: FollowUpStatus
   assignedToId: number
@@ -125,6 +155,8 @@ export interface TicketDto {
   createdAt: string
   updatedAt: string
   resolvedAt: string | null
+  /** ERP build that fixed the issue (set when resolving), e.g. "v2.4.1" */
+  resolvedVersion: string | null
   commentCount: number
 }
 

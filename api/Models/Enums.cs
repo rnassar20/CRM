@@ -22,6 +22,8 @@ public enum ClientStatus
 
 public enum PaymentStatus { Unpaid, Paid }
 
+public enum BillingCycle { Monthly, Yearly }
+
 public enum TicketPriority { Low, Medium, High, Critical }
 
 public enum TicketStatus { Open, InProgress, Resolved, Closed }
@@ -39,6 +41,9 @@ public enum InteractionOutcome
 }
 
 public enum FollowUpStatus { Pending, Done, Missed, Cancelled }
+
+/// <summary>Internal = dev/build tasks, Support = tied to a ticket, Marketing = sales/outreach.</summary>
+public enum FollowUpType { Marketing, Internal, Support }
 
 public enum WhatsAppDirection { Outgoing, Incoming }
 

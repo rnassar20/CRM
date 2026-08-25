@@ -128,6 +128,10 @@ public class TicketsController(AppDbContext db) : ControllerBase
             ticket.ResolvedAt = s is TicketStatus.Resolved or TicketStatus.Closed ? DateTime.UtcNow : null;
         }
 
+        // ERP build/version that fixed the issue (e.g. "v2.4.1"); empty string clears it
+        if (request.ResolvedVersion is not null)
+            ticket.ResolvedVersion = string.IsNullOrWhiteSpace(request.ResolvedVersion) ? null : request.ResolvedVersion.Trim();
+
         if (request.Unassign) ticket.AssignedToId = null;
         else if (request.AssignedToId is { } uid)
         {

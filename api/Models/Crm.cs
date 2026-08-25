@@ -24,6 +24,10 @@ public class FollowUp
     public Client Client { get; set; } = null!;
     public string Title { get; set; } = "";
     public string? Description { get; set; }
+    public FollowUpType Type { get; set; } = FollowUpType.Marketing;
+    /// <summary>Support follow-ups reference the ticket being chased (shows its number/title).</summary>
+    public int? TicketId { get; set; }
+    public Ticket? Ticket { get; set; }
     public DateTime ScheduledAt { get; set; }
     public FollowUpStatus Status { get; set; } = FollowUpStatus.Pending;
     public int AssignedToId { get; set; }

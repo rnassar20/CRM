@@ -18,6 +18,7 @@ public record CreateInteractionRequest(
 
 public record FollowUpDto(
     int Id, int ClientId, string ClientName, string Title, string? Description,
+    string Type, int? TicketId, string? TicketTitle,
     DateTime ScheduledAt, string Status, int AssignedToId, string AssignedToName,
     DateTime? ReminderSentAt, DateTime CreatedAt);
 
@@ -26,11 +27,16 @@ public record CreateFollowUpRequest(
     [Required, MaxLength(200)] string Title,
     string? Description,
     [Required] DateTime ScheduledAt,
-    int? AssignedToId);
+    /// <summary>Marketing (default), Internal (build/version work) or Support (linked to a ticket).</summary>
+    string Type = "Marketing",
+    int? TicketId = null,
+    int? AssignedToId = null);
 
 public record UpdateFollowUpRequest(
     string? Title,
     string? Description,
     DateTime? ScheduledAt,
     string? Status,
+    string? Type,
+    int? TicketId,
     int? AssignedToId);

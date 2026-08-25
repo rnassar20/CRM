@@ -228,7 +228,7 @@ function NewSubModal({ plans, onClose, onSaved }: { plans: PlanDto[]; onClose: (
         <Field label="Plan *">
           <select value={planId} onChange={(e) => setPlanId(Number(e.target.value))}>
             {plans.map((p) => (
-              <option key={p.id} value={p.id}>{p.name} ({p.durationDays}d)</option>
+              <option key={p.id} value={p.id}>{p.name} ({p.cycle})</option>
             ))}
           </select>
         </Field>
