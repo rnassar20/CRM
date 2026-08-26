@@ -9,4 +9,4 @@ renewals inside your local VB.NET desktop ERP.
 | Backend  | ASP.NET Core (.NET 10) Web API, EF Core, JWT auth, BCrypt |
 | Database | PostgreSQL 16 (Docker) |
 | Frontend | React 19 + Vite + TypeScript |
-| WhatsApp | Provider interface → Logging sender (dev) or **Meta WhatsApp Cloud 
+| WhatsApp | Provider interface → Logging sender (dev) or **Meta WhatsApp Cloud API
