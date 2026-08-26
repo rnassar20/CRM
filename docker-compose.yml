@@ -7,15 +7,14 @@ services:
     environment:
       POSTGRES_DB: crm_db
       POSTGRES_USER: crm
-      POSTGRES_PASSWORD: crm@dock123
+      # Read from .env (gitignored). Falls back to a dev-only default that matches
+      # api/appsettings.Development.json. Never use these defaults in production.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_dev_d80f006d}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - crm_pgdata:/var/lib/postgresql/data
     restart: unless-stopped
 
 volumes:
   crm_pgdata:
-    external: true
-    # created when the project lived in ".../Default Project" - reused so no data is lost
-    name: defaultproject_crm_pgdata

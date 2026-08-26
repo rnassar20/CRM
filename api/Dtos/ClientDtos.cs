@@ -26,7 +26,7 @@ public record SaveClientContactRequest(
     [Required, MaxLength(200)] string Name,
     [Required, Phone, MaxLength(30)] string Phone,
     [EmailAddress] string? Email,
-    string? Notes,
+    [MaxLength(2000)] string? Notes,
     bool AllowWhatsApp = false);
 
 public record CreateClientRequest(
@@ -34,11 +34,11 @@ public record CreateClientRequest(
     [MaxLength(200)] string ContactPerson,
     [Required, Phone] string Phone,
     [EmailAddress] string? Email,
-    string? Address,
+    [MaxLength(500)] string? Address,
     [MaxLength(100)] string? City,
     [Required] string Type,
     [Required] string Status,
-    string? Notes,
+    [MaxLength(4000)] string? Notes,
     /// <summary>Optional agenda entry created with the client ("when should I contact them first").</summary>
     DateTime? FirstContactAt);
 
@@ -47,10 +47,10 @@ public record UpdateClientRequest(
     [MaxLength(200)] string ContactPerson,
     [Required, Phone] string Phone,
     [EmailAddress] string? Email,
-    string? Address,
+    [MaxLength(500)] string? Address,
     [MaxLength(100)] string? City,
     [Required] string Type,
     [Required] string Status,
-    string? Notes);
+    [MaxLength(4000)] string? Notes);
 
 public record ClientStatusRequest([Required] string Status);

@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-# CRM
-mydev opencode CRM
-=======
 # ERP CRM — Web App
 
 A web-based CRM to manage your ERP clients: subscriptions with expiry reminders over WhatsApp,
@@ -48,7 +44,7 @@ npm install --prefix web
 npm run dev --prefix web
 ```
 
-First run creates the schema and seeds demo data automatically (`EnsureCreated`).
+First run applies EF Core migrations and seeds demo data automatically (`db.Database.Migrate()`).
 
 **Seeded admin:** `admin@crm.local` / `Admin@123`
 The first account registered becomes Admin; afterwards only Admins can create users.
@@ -67,7 +63,7 @@ The DB lives in Docker but any client works the same way. In pgAdmin 4:
 | Port | **5433** (5432 is your separate local PostgreSQL install) |
 | Database | `crm_db` |
 | Username | `crm` |
-| Password | value of `POSTGRES_PASSWORD` in `docker-compose.yml` |
+| Password | value of `POSTGRES_PASSWORD` in your `.env` file (see below) |
 
 Tip: enable *Start Docker Desktop when you sign in* — the API expects Postgres to be reachable
 at startup and fails its first request otherwise.
@@ -88,11 +84,38 @@ at startup and fails its first request otherwise.
 | WhatsApp message logging incl. voice/image schema | `WhatsAppMessage` table (MediaType: Text/Image/Voice/Document, MediaUrl, status, provider id) |
 | Dashboard KPIs | `DashboardController.cs` |
 
-## Configuration (`api/appsettings.json`)
+## Configuration
+
+**No secrets are committed.** All credentials are injected at runtime through environment
+variables (or a local gitignored `.env`), never hardcoded:
+
+| Setting | Env var (hierarchical keys use `__`) |
+|---|---|
+| DB connection string | `ConnectionStrings__Default` |
+| JWT signing secret (≥ 64 chars, random) | `Jwt__Secret` |
+| License master secret (matches desktop ERP) | `Licensing__Secret` |
+| JWT issuer / audience | `Jwt__Issuer`, `Jwt__Audience` |
+| WhatsApp provider (`Logging`/`MetaCloud`) | `WhatsApp__Provider` |
+| Meta access token / phone id / api version | `WhatsApp__MetaCloud__AccessToken`, `WhatsApp__MetaCloud__PhoneNumberId`, `WhatsApp__MetaCloud__ApiVersion` |
+
+For local development, copy the template and fill it in (never commit it):
+
+```powershell
+Copy-Item .env.example .env
+# edit .env — Postgres password, JWT secret, licensing secret, Meta token...
+```
+
+```bash
+# .env is read by docker compose (and docker-compose only). For the API,
+# use dotnet user-secrets or set the env vars in your shell, e.g.:
+$env:Jwt__Secret = "<random 64+ chars>"
+```
+
+Example resolved config (the shape the API expects):
 
 ```jsonc
-"ConnectionStrings": { "Default": "Host=localhost;Port=5433;..." },
-"Jwt":         { "Secret": "...at least 64 chars..." },
+"ConnectionStrings": { "Default": "Host=localhost;Port=5433;Database=crm_db;Username=crm;Password=<from .env>" },
+"Jwt":         { "Secret": "<env Jwt__Secret>" },
 "Licensing":   { "Secret": "must match your desktop ERP validator" },
 "WhatsApp": {
   "Provider": "Logging",              // switch to "MetaCloud" when you have a token
@@ -105,6 +128,9 @@ at startup and fails its first request otherwise.
                  "LicenseDelivered": "...{client} {plan} {key} {expiry}..." }
 }
 ```
+
+The API **fails fast at startup** if `ConnectionStrings__Default`, `Jwt__Secret` or
+`Licensing__Secret` are missing or still set to a placeholder.
 
 With `Provider: "Logging"` nothing is really sent — messages are stored in `WhatsAppMessages`
 and written to the console log, so you can develop safely. Switching to `"MetaCloud"` sends real
@@ -123,7 +149,7 @@ Drop this module into your VB.NET ERP's activation screen:
 ```vb
 ' LicenseValidator.vb — needs Imports System.Security.Cryptography, System.Text, System.Collections.Generic
 Public Class LicenseValidator
-    ' MUST equal api appsettings.json -> Licensing:Secret
+    ' MUST equal the API's Licensing:Secret (env var Licensing__Secret / appsettings.Development.json)
     Private Const MasterSecret As String = "DEV_ONLY_license_master_secret_change_me"
 
     ''' <summary>True if the key belongs to clientId and has not expired.</summary>
@@ -227,11 +253,13 @@ GET /api/users/agents                                  (assignment dropdowns)
 
 ## Production checklist (before real deployment)
 
-- [ ] Change `Jwt:Secret`, `Licensing:Secret`, DB password (`appsettings.Production.json` / env vars).
-- [ ] Replace `EnsureCreated()` with EF Core migrations (`dotnet ef migrations add Init`) once schema evolves.
-- [ ] HTTPS on the API + restrict CORS origins to your real domain.
+- [ ] Set strong secrets via env vars / your secret manager — never the dev `.env` values: `ConnectionStrings__Default`, `Jwt__Secret` (random, ≥ 64 chars), `Licensing__Secret` (must match the desktop ERP validator).
+- [ ] The API already refuses to start with missing/placeholder secrets — keep that enabled.
+- [ ] HTTPS on the API + restrict CORS origins to your real domain (`Program.cs`).
+- [ ] `AllowedHosts` in `appsettings.json` → your real domain(s).
 - [ ] Set `WhatsApp:Provider=MetaCloud` with a real WABA token; keep `Logging` in dev.
-- [ ] Back up Postgres volume (`crm_pgdata`). Consider per-client row filtering if you host multiple tenants.
+- [ ] Back up Postgres volume. Consider per-client row filtering if you host multiple tenants.
+- [ ] Run the test suite (`dotnet test`) in CI before every deploy.
 
 ## Fit with your migration roadmap
 
@@ -241,4 +269,3 @@ This project is deliberately the **seed of the online ERP** described in your pl
 - **2-a** — your VB.NET WinForms screens can call this same API (HttpClient) instead of SqlConnection; the `/subscriptions/validate-key` endpoint mirrors what an offline validator does.
 - **2-b / 2-c** — React pages here become the module pages embedded in WebView2 or served standalone.
 - **3-a / 3-b / 3-c** — the API contract is stateless JWT; an offline shell (Electron/Blazor) with SQLite can sync against these same endpoints later.
->>>>>>> 6245033 (Initial commit: CRM web app (ASP.NET Core API + React + PostgreSQL))

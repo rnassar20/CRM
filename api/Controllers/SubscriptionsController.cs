@@ -178,8 +178,11 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
     /// <summary>Offline validation endpoint - mirrors what the desktop ERP does with a entered key.</summary>
     [HttpPost("validate-key")]
     [AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("validate")]
     public async Task<ActionResult<LicenseCheckResponse>> ValidateKey([FromBody] ValidateKeyRequest request)
     {
+        // Note: failure reasons are deliberately generic so internal crypto details are never
+        // exposed to callers. The desktop ERP only needs a yes/no + the parsed facts.
         try
         {
             var (clientId, subId, expiry) = license.ParseKey(request.Key);
@@ -187,9 +190,9 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
                 s.Id == subId && s.LicenseKeyHash == license.HashKey(request.Key));
             return Ok(new LicenseCheckResponse(true, null, clientId, subId, expiry, hashMatches));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return Ok(new LicenseCheckResponse(false, ex.Message, null, null, null, false));
+            return Ok(new LicenseCheckResponse(false, "Invalid license key.", null, null, null, false));
         }
     }
 }
