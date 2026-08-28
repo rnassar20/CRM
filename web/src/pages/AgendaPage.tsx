@@ -1,45 +1,32 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, errMsg } from '../api'
+import { fieldError, errMsg, fieldErrors } from '../api'
 import { Badge, Empty, ErrorBox, Field, Modal, Spinner } from '../components/ui'
-import { daysUntil, fmtDateTime, toLocalInputPlusDays, type AgentDto, type FollowUpDto, type FollowUpType, type PagedResult, type TicketDto } from '../types'
+import { daysUntil, fmtDateTime, toLocalInputPlusDays, type AgentDto, type FollowUpDto, type FollowUpType } from '../types'
+import {
+  useAgents,
+  useCancelFollowUp,
+  useClientOptions,
+  useClientTickets,
+  useCompleteFollowUp,
+  useCreateFollowUp,
+  useFollowUps,
+} from '../queries'
 
 const FOLLOWUP_TYPES: FollowUpType[] = ['Marketing', 'Internal', 'Support']
 
 export default function AgendaPage() {
-  const [items, setItems] = useState<FollowUpDto[] | null>(null)
-  const [agents, setAgents] = useState<AgentDto[]>([])
   const [mineOnly, setMineOnly] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [showNew, setShowNew] = useState(false)
+  const { data: items, error, isLoading } = useFollowUps(mineOnly)
+  const { data: agents = [] } = useAgents()
 
-  const load = useCallback(async () => {
-    setError(null)
-    try {
-      const res = await api.get<FollowUpDto[]>('/followups', {
-        params: { mineOnly, status: '' },
-      })
-      setItems(res.data)
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [mineOnly])
+  const complete = useCompleteFollowUp()
+  const cancel = useCancelFollowUp()
 
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    api.get<AgentDto[]>('/users/agents').then((r) => setAgents(r.data)).catch(() => {})
-  }, [])
-
-  async function act(id: number, action: 'complete' | 'cancel') {
-    try {
-      await api.patch(`/followups/${id}/${action}`)
-      load()
-    } catch (e) {
-      setError(errMsg(e))
-    }
+  function act(id: number, action: 'complete' | 'cancel') {
+    if (action === 'complete') complete.mutate(id)
+    else cancel.mutate(id)
   }
 
   const groups = splitGroups(items ?? [])
@@ -56,8 +43,9 @@ export default function AgendaPage() {
         </div>
       </div>
 
-      {error && <ErrorBox message={error} />}
-      {!items && !error && <Spinner />}
+      {error && <ErrorBox message={errMsg(error)} />}
+      {errMsg(complete.error) && <ErrorBox message={errMsg(complete.error)} />}
+      {isLoading && !items && <Spinner />}
 
       {items && (
         <>
@@ -68,7 +56,7 @@ export default function AgendaPage() {
         </>
       )}
 
-      {showNew && <NewFollowUpModal agents={agents} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load() }} />}
+      {showNew && <NewFollowUpModal agents={agents} onClose={() => setShowNew(false)} onSaved={() => setShowNew(false)} />}
     </>
   )
 }
@@ -143,8 +131,7 @@ function Section({
 }
 
 function NewFollowUpModal({ agents, onClose, onSaved }: { agents: AgentDto[]; onClose: () => void; onSaved: () => void }) {
-  const [clients, setClients] = useState<{ id: number; name: string }[]>([])
-  const [tickets, setTickets] = useState<TicketDto[]>([])
+  const { data: clients = [] } = useClientOptions()
   const [form, setForm] = useState({
     clientId: '',
     title: '',
@@ -154,34 +141,15 @@ function NewFollowUpModal({ agents, onClose, onSaved }: { agents: AgentDto[]; on
     type: 'Marketing' as FollowUpType,
     ticketId: '',
   })
-  const [error, setError] = useState<string | null>(null)
+  const { data: tickets = [] } = useClientTickets(form.type === 'Support' ? Number(form.clientId) || null : null)
+  const create = useCreateFollowUp()
 
-  useEffect(() => {
-    api
-      .get<PagedResult<{ id: number; name: string }>>('/clients', { params: { pageSize: 100 } })
-      .then((r) => setClients(r.data.items))
-      .catch(() => {})
-  }, [])
-
-  // support follow-ups need a ticket to reference - load the client's tickets
-  useEffect(() => {
-    setTickets([])
-    setForm((f) => ({ ...f, ticketId: '' }))
-    if (form.type === 'Support' && form.clientId) {
-      api
-        .get<PagedResult<TicketDto>>('/tickets', { params: { clientId: Number(form.clientId), pageSize: 100 } })
-        .then((r) => setTickets(r.data.items))
-        .catch(() => {})
-    }
-  }, [form.type, form.clientId])
-
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault()
-    if (!form.clientId) return setError('Select a client.')
-    if (form.type === 'Support' && !form.ticketId) return setError('Support follow-ups need a ticket.')
-    setError(null)
-    try {
-      await api.post('/followups', {
+    if (!form.clientId) return
+    if (form.type === 'Support' && !form.ticketId) return
+    create.mutate(
+      {
         clientId: Number(form.clientId),
         title: form.title,
         description: form.description || null,
@@ -189,12 +157,13 @@ function NewFollowUpModal({ agents, onClose, onSaved }: { agents: AgentDto[]; on
         assignedToId: form.assignedToId ? Number(form.assignedToId) : undefined,
         type: form.type,
         ticketId: form.type === 'Support' && form.ticketId ? Number(form.ticketId) : null,
-      })
-      onSaved()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+      },
+      { onSuccess: onSaved },
+    )
   }
+
+  const e = create.error
+  const globalErr = fieldErrors(e) ? null : errMsg(e)
 
   return (
     <Modal title="Schedule follow-up" onClose={onClose}>
@@ -202,8 +171,8 @@ function NewFollowUpModal({ agents, onClose, onSaved }: { agents: AgentDto[]; on
         Marketing = sales/outreach · Internal = build/version work · Support = linked to an open ticket.
       </p>
       <form onSubmit={submit} className="form-grid">
-        <Field label="Client *">
-          <select value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })} required>
+        <Field label="Client *" error={fieldError(e, 'clientId')}>
+          <select value={form.clientId} onChange={(ev) => setForm({ ...form, clientId: ev.target.value, ticketId: '' })} required>
             <option value="">— select —</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
@@ -211,15 +180,15 @@ function NewFollowUpModal({ agents, onClose, onSaved }: { agents: AgentDto[]; on
           </select>
         </Field>
         <Field label="Type">
-          <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as FollowUpType })}>
+          <select value={form.type} onChange={(ev) => setForm({ ...form, type: ev.target.value as FollowUpType, ticketId: '' })}>
             {FOLLOWUP_TYPES.map((t) => (
               <option key={t}>{t}{t === 'Internal' ? ' (build/version)' : t === 'Support' ? ' (ticket)' : ''}</option>
             ))}
           </select>
         </Field>
         {form.type === 'Support' && (
-          <Field label="Ticket *">
-            <select value={form.ticketId} onChange={(e) => setForm({ ...form, ticketId: e.target.value })}>
+          <Field label="Ticket *" error={fieldError(e, 'ticketId')}>
+            <select value={form.ticketId} onChange={(ev) => setForm({ ...form, ticketId: ev.target.value })}>
               <option value="">— select ticket —</option>
               {tickets.map((t) => (
                 <option key={t.id} value={t.id}>#{t.id} · {t.title} ({t.status})</option>
@@ -227,19 +196,19 @@ function NewFollowUpModal({ agents, onClose, onSaved }: { agents: AgentDto[]; on
             </select>
           </Field>
         )}
-        <Field label="Title *">
-          <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
+        <Field label="Title *" error={fieldError(e, 'title') ?? fieldError(e, 'Title')}>
+          <input value={form.title} onChange={(ev) => setForm({ ...form, title: ev.target.value })} required />
         </Field>
-        <Field label="When *">
+        <Field label="When *" error={fieldError(e, 'scheduledAt') ?? fieldError(e, 'ScheduledAt')}>
           <input
             type="datetime-local"
             value={form.scheduledAt}
-            onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
+            onChange={(ev) => setForm({ ...form, scheduledAt: ev.target.value })}
             required
           />
         </Field>
         <Field label="Assign to">
-          <select value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}>
+          <select value={form.assignedToId} onChange={(ev) => setForm({ ...form, assignedToId: ev.target.value })}>
             <option value="">Me</option>
             {agents.map((a) => (
               <option key={a.id} value={a.id}>{a.fullName}</option>
@@ -247,12 +216,12 @@ function NewFollowUpModal({ agents, onClose, onSaved }: { agents: AgentDto[]; on
           </select>
         </Field>
         <Field label="Description">
-          <textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <textarea rows={2} value={form.description} onChange={(ev) => setForm({ ...form, description: ev.target.value })} />
         </Field>
-        {error && <ErrorBox message={error} />}
+        {globalErr && <ErrorBox message={globalErr} />}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary">Schedule</button>
+          <button className="btn btn-primary" disabled={create.isPending}>Schedule</button>
         </div>
       </form>
     </Modal>

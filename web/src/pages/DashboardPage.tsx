@@ -1,27 +1,17 @@
-import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, errMsg } from '../api'
+import { useDashboard } from '../queries'
 import { Badge, Empty, ErrorBox, Spinner } from '../components/ui'
 import {
   daysUntil,
   fmtDateTime,
-  type DashboardStats,
 } from '../types'
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const { data: stats, error, isLoading } = useDashboard()
   const navigate = useNavigate()
 
-  useEffect(() => {
-    api
-      .get<DashboardStats>('/dashboard/stats')
-      .then((r) => setStats(r.data))
-      .catch((e) => setError(errMsg(e)))
-  }, [])
-
-  if (error) return <ErrorBox message={error} />
-  if (!stats) return <Spinner />
+  if (error) return <ErrorBox message={error.message} />
+  if (isLoading || !stats) return <Spinner />
 
   const cards: { label: string; value: number; tone?: string; to?: string }[] = [
     { label: 'Clients', value: stats.clientsTotal, to: '/clients' },

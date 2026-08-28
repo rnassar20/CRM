@@ -1,50 +1,39 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
-import { api, errMsg } from '../api'
+import { type FormEvent, useState } from 'react'
+import { fieldError, errMsg } from '../api'
 import { Badge, Empty, ErrorBox, Field, Modal, Spinner } from '../components/ui'
 import {
   fmtDateTime,
   type AgentDto,
-  type PagedResult,
   type TicketCommentDto,
   type TicketDto,
   type TicketPriority,
   type TicketStatus,
 } from '../types'
+import {
+  useAddComment,
+  useAgents,
+  useClientOptions,
+  useCreateTicket,
+  useTicket,
+  useTickets,
+  useUpdateTicket,
+  useDebouncedValue,
+} from '../queries'
 
 const PRIORITIES: TicketPriority[] = ['Low', 'Medium', 'High', 'Critical']
 const STATUSES: TicketStatus[] = ['Open', 'InProgress', 'Resolved', 'Closed']
 
 export default function TicketsPage() {
-  const [data, setData] = useState<PagedResult<TicketDto> | null>(null)
-  const [agents, setAgents] = useState<AgentDto[]>([])
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [priority, setPriority] = useState('')
   const [page, setPage] = useState(1)
-  const [error, setError] = useState<string | null>(null)
   const [showNew, setShowNew] = useState(false)
   const [openId, setOpenId] = useState<number | null>(null)
 
-  useEffect(() => {
-    api.get<AgentDto[]>('/users/agents').then((r) => setAgents(r.data)).catch(() => {})
-  }, [])
-
-  const load = useCallback(async () => {
-    setError(null)
-    try {
-      const res = await api.get<PagedResult<TicketDto>>('/tickets', {
-        params: { q: q || undefined, status: status || undefined, priority: priority || undefined, page, pageSize: 20 },
-      })
-      setData(res.data)
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [q, status, priority, page])
-
-  useEffect(() => {
-    const t = setTimeout(load, q ? 300 : 0)
-    return () => clearTimeout(t)
-  }, [load, q])
+  const debouncedQ = useDebouncedValue(q)
+  const { data, error, isLoading } = useTickets({ q: debouncedQ, status, priority, page, pageSize: 20 })
+  const { data: agents = [] } = useAgents()
 
   return (
     <>
@@ -65,8 +54,8 @@ export default function TicketsPage() {
         </select>
       </div>
 
-      {error && <ErrorBox message={error} />}
-      {!data && !error && <Spinner />}
+      {error && <ErrorBox message={errMsg(error)} />}
+      {isLoading && !data && <Spinner />}
 
       {data && (
         <>
@@ -111,131 +100,123 @@ export default function TicketsPage() {
       )}
 
       {showNew && (
-        <NewTicketModal agents={agents} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load() }} />
+        <NewTicketModal agents={agents} onClose={() => setShowNew(false)} onSaved={() => setShowNew(false)} />
       )}
       {openId !== null && (
-        <TicketDetailModal ticketId={openId} agents={agents} onClose={() => setOpenId(null)} onChanged={load} />
+        <TicketDetailModal ticketId={openId} agents={agents} onClose={() => setOpenId(null)} />
       )}
     </>
   )
 }
 
 function NewTicketModal({ agents, onClose, onSaved }: { agents: AgentDto[]; onClose: () => void; onSaved: () => void }) {
-  const [clients, setClients] = useState<{ id: number; name: string }[]>([])
+  const { data: clients = [] } = useClientOptions()
   const [form, setForm] = useState({ clientId: '', title: '', description: '', priority: 'Medium', assignedToId: '' })
-  const [error, setError] = useState<string | null>(null)
+  const create = useCreateTicket()
 
-  useEffect(() => {
-    api
-      .get<PagedResult<{ id: number; name: string }>>('/clients', { params: { pageSize: 100 } })
-      .then((r) => setClients(r.data.items))
-      .catch(() => {})
-  }, [])
-
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault()
-    if (!form.clientId) return setError('Select a client.')
-    setError(null)
-    try {
-      await api.post('/tickets', {
+    if (!form.clientId) return
+    create.mutate(
+      {
         clientId: Number(form.clientId),
         title: form.title,
         description: form.description || null,
         priority: form.priority,
         assignedToId: form.assignedToId ? Number(form.assignedToId) : null,
-      })
-      onSaved()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+      },
+      { onSuccess: onSaved },
+    )
   }
 
+  const e = create.error
   return (
     <Modal title="New ticket" onClose={onClose}>
       <form onSubmit={submit} className="form-grid">
-        <Field label="Client *">
-          <select value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })} required>
+        <Field label="Client *" error={fieldError(e, 'clientId')}>
+          <select value={form.clientId} onChange={(ev) => setForm({ ...form, clientId: ev.target.value })} required>
             <option value="">— select —</option>
             {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
-        <Field label="Title *">
-          <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
+        <Field label="Title *" error={fieldError(e, 'title') ?? fieldError(e, 'Title')}>
+          <input value={form.title} onChange={(ev) => setForm({ ...form, title: ev.target.value })} required />
         </Field>
         <Field label="Description">
-          <textarea rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <textarea rows={3} value={form.description} onChange={(ev) => setForm({ ...form, description: ev.target.value })} />
         </Field>
         <div className="grid-2">
-          <Field label="Priority">
-            <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+          <Field label="Priority" error={fieldError(e, 'priority') ?? fieldError(e, 'Priority')}>
+            <select value={form.priority} onChange={(ev) => setForm({ ...form, priority: ev.target.value })}>
               {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
             </select>
           </Field>
-          <Field label="Assign to">
-            <select value={form.assignedToId} onChange={(e) => setForm({ ...form, assignedToId: e.target.value })}>
+          <Field label="Assign to" error={fieldError(e, 'assignedToId')}>
+            <select value={form.assignedToId} onChange={(ev) => setForm({ ...form, assignedToId: ev.target.value })}>
               <option value="">Unassigned</option>
               {agents.map((a) => <option key={a.id} value={a.id}>{a.fullName}</option>)}
             </select>
           </Field>
         </div>
-        {error && <ErrorBox message={error} />}
+        {errMsg(e) && <ErrorBox message={errMsg(e)} />}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary">Create ticket</button>
+          <button className="btn btn-primary" disabled={create.isPending}>Create ticket</button>
         </div>
       </form>
     </Modal>
   )
 }
 
-function TicketDetailModal({ ticketId, agents, onClose, onChanged }: { ticketId: number; agents: AgentDto[]; onClose: () => void; onChanged: () => void }) {
-  const [ticket, setTicket] = useState<TicketDto | null>(null)
-  const [comments, setComments] = useState<TicketCommentDto[]>([])
+function TicketDetailModal({ ticketId, agents, onClose }: { ticketId: number; agents: AgentDto[]; onClose: () => void }) {
+  const { data, error, isLoading } = useTicket(ticketId)
+
+  if (error) return <Modal title={`Ticket #${ticketId}`} onClose={onClose}><ErrorBox message={errMsg(error)} /></Modal>
+  if (isLoading || !data) return <Modal title={`Ticket #${ticketId}`} onClose={onClose}><Spinner /></Modal>
+
+  return (
+    <TicketBody
+      key={ticketId}
+      ticket={data.ticket}
+      comments={data.comments}
+      agents={agents}
+      ticketId={ticketId}
+      onClose={onClose}
+    />
+  )
+}
+
+function TicketBody({
+  ticketId,
+  ticket,
+  comments,
+  agents,
+  onClose,
+}: {
+  ticketId: number
+  ticket: TicketDto
+  comments: TicketCommentDto[]
+  agents: AgentDto[]
+  onClose: () => void
+}) {
   const [comment, setComment] = useState('')
   const [isInternal, setIsInternal] = useState(false)
-  const [version, setVersion] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [version, setVersion] = useState(ticket.resolvedVersion ?? '')
+  const patch = useUpdateTicket(ticketId)
+  const addComment = useAddComment(ticketId)
 
-  const load = useCallback(async () => {
-    try {
-      const res = await api.get(`/tickets/${ticketId}`)
-      setTicket(res.data.ticket)
-      setComments(res.data.comments)
-      setVersion(res.data.ticket.resolvedVersion ?? '')
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [ticketId])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  async function patch(payload: Record<string, unknown>) {
-    setError(null)
-    try {
-      await api.put(`/tickets/${ticketId}`, payload)
-      await load()
-      onChanged()
-    } catch (e) {
-      setError(errMsg(e))
-    }
+  function patchTicket(payload: Record<string, unknown>) {
+    patch.mutate(payload)
   }
 
-  async function addComment(e: FormEvent) {
+  function submitComment(e: FormEvent) {
     e.preventDefault()
     if (!comment.trim()) return
-    try {
-      await api.post(`/tickets/${ticketId}/comments`, { body: comment, isInternal })
-      setComment('')
-      await load()
-      onChanged()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+    addComment.mutate(
+      { body: comment, isInternal },
+      { onSuccess: () => setComment('') },
+    )
   }
-
-  if (!ticket) return <Modal title={`Ticket #${ticketId}`} onClose={onClose}><Spinner /></Modal>
 
   return (
     <Modal title={`#${ticket.id} · ${ticket.title}`} onClose={onClose} wide>
@@ -246,12 +227,12 @@ function TicketDetailModal({ ticketId, agents, onClose, onChanged }: { ticketId:
 
       <div className="grid-3">
         <Field label="Status">
-          <select value={ticket.status} onChange={(e) => patch({ status: e.target.value })}>
+          <select value={ticket.status} onChange={(e) => patchTicket({ status: e.target.value })}>
             {STATUSES.map((s) => <option key={s}>{s}</option>)}
           </select>
         </Field>
         <Field label="Priority">
-          <select value={ticket.priority} onChange={(e) => patch({ priority: e.target.value })}>
+          <select value={ticket.priority} onChange={(e) => patchTicket({ priority: e.target.value })}>
             {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
           </select>
         </Field>
@@ -259,7 +240,7 @@ function TicketDetailModal({ ticketId, agents, onClose, onChanged }: { ticketId:
           <select
             value={ticket.assignedToId ?? ''}
             onChange={(e) =>
-              patch(e.target.value === '' ? { unassign: true } : { assignedToId: Number(e.target.value) })
+              patchTicket(e.target.value === '' ? { unassign: true } : { assignedToId: Number(e.target.value) })
             }
           >
             <option value="">Unassigned</option>
@@ -280,7 +261,7 @@ function TicketDetailModal({ ticketId, agents, onClose, onChanged }: { ticketId:
           <div style={{ alignSelf: 'end' }}>
             <button
               className="btn btn-small btn-primary"
-              onClick={() => patch({ resolvedVersion: version })}
+              onClick={() => patchTicket({ resolvedVersion: version })}
               type="button"
             >
               Save version
@@ -303,7 +284,7 @@ function TicketDetailModal({ ticketId, agents, onClose, onChanged }: { ticketId:
         ))}
       </div>
 
-      <form onSubmit={addComment} className="add-comment">
+      <form onSubmit={submitComment} className="add-comment">
         <textarea
           rows={2}
           placeholder="Write a comment…"
@@ -313,9 +294,9 @@ function TicketDetailModal({ ticketId, agents, onClose, onChanged }: { ticketId:
         <label className="check">
           <input type="checkbox" checked={isInternal} onChange={(e) => setIsInternal(e.target.checked)} /> internal note
         </label>
-        <button className="btn btn-primary">Add comment</button>
+        <button className="btn btn-primary" disabled={addComment.isPending}>Add comment</button>
       </form>
-      {error && <ErrorBox message={error} />}
+      {errMsg(patch.error) && <ErrorBox message={errMsg(patch.error)} />}
     </Modal>
   )
 }

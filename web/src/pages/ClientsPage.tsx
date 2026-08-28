@@ -1,44 +1,27 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, errMsg } from '../api'
+import { fieldError, errMsg } from '../api'
 import { Badge, ErrorBox, Field, Modal, Spinner } from '../components/ui'
 import {
   daysUntil,
   fmtDate,
-  type ClientListItem,
   type ClientStatus,
   type ClientType,
-  type PagedResult,
 } from '../types'
+import { useClients, useCreateClient, useDebouncedValue } from '../queries'
 
 const CLIENT_TYPES: ClientType[] = ['Pharmacy', 'GiftShop', 'DoctorClinic', 'Hospital', 'Other']
 const CLIENT_STATUSES: ClientStatus[] = ['Potential', 'Contacted', 'Interested', 'NotInterested', 'Subscribed']
 
 export default function ClientsPage() {
-  const [data, setData] = useState<PagedResult<ClientListItem> | null>(null)
   const [q, setQ] = useState('')
   const [type, setType] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
-  const [error, setError] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      setError(null)
-      const res = await api.get<PagedResult<ClientListItem>>('/clients', {
-        params: { q: q || undefined, type: type || undefined, status: status || undefined, page, pageSize: 20 },
-      })
-      setData(res.data)
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [q, type, status, page])
-
-  useEffect(() => {
-    const t = setTimeout(load, q ? 300 : 0)
-    return () => clearTimeout(t)
-  }, [load, q])
+  const debouncedQ = useDebouncedValue(q, q ? 300 : 0)
+  const { data, error, isLoading } = useClients({ q: debouncedQ, type, status, page, pageSize: 20 })
 
   return (
     <>
@@ -65,8 +48,8 @@ export default function ClientsPage() {
         </select>
       </div>
 
-      {error && <ErrorBox message={error} />}
-      {!data && !error && <Spinner />}
+      {error && <ErrorBox message={errMsg(error)} />}
+      {isLoading && !data && <Spinner />}
 
       {data && (
         <>
@@ -116,7 +99,7 @@ export default function ClientsPage() {
         </>
       )}
 
-      {showAdd && <AddClientModal onClose={() => setShowAdd(false)} onSaved={() => { setShowAdd(false); load() }} />}
+      {showAdd && <AddClientModal onClose={() => setShowAdd(false)} onSaved={() => setShowAdd(false)} />}
     </>
   )
 }
@@ -144,53 +127,49 @@ function AddClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
     notes: '',
     firstContactAt: '',
   })
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const create = useCreateClient()
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm({ ...form, [k]: e.target.value })
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
-      await api.post('/clients', {
+    create.mutate(
+      {
         ...form,
         email: form.email || null,
         firstContactAt: form.firstContactAt ? new Date(form.firstContactAt).toISOString() : null,
-      })
-      onSaved()
-    } catch (err) {
-      setError(errMsg(err))
-    } finally {
-      setBusy(false)
-    }
+      },
+      { onSuccess: onSaved },
+    )
   }
+
+  const e = create.error
+  const fe = (f: string) => fieldError(e, f) ?? fieldError(e, f.charAt(0).toUpperCase() + f.slice(1))
 
   return (
     <Modal title="Add client" onClose={onClose}>
       <form onSubmit={submit} className="form-grid">
-        <Field label="Name *">
+        <Field label="Name *" error={fe('name')}>
           <input value={form.name} onChange={set('name')} required />
         </Field>
-        <Field label="Contact person">
+        <Field label="Contact person" error={fe('contactPerson')}>
           <input value={form.contactPerson} onChange={set('contactPerson')} />
         </Field>
-        <Field label="Phone (WhatsApp) *">
+        <Field label="Phone (WhatsApp) *" error={fe('phone')}>
           <input value={form.phone} onChange={set('phone')} placeholder="+20xxxxxxxxxx" required />
         </Field>
-        <Field label="Email">
+        <Field label="Email" error={fe('email')}>
           <input type="email" value={form.email} onChange={set('email')} />
         </Field>
-        <Field label="Type *">
+        <Field label="Type *" error={fe('type')}>
           <select value={form.type} onChange={set('type')}>
             {CLIENT_TYPES.map((t) => (
               <option key={t}>{t}</option>
             ))}
           </select>
         </Field>
-        <Field label="Status *">
+        <Field label="Status *" error={fe('status')}>
           <select value={form.status} onChange={set('status')}>
             {CLIENT_STATUSES.map((s) => (
               <option key={s}>{s}</option>
@@ -209,10 +188,10 @@ function AddClientModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
         <Field label="Notes">
           <textarea rows={2} value={form.notes} onChange={set('notes')} />
         </Field>
-        {error && <ErrorBox message={error} />}
+        {errMsg(e) && <ErrorBox message={errMsg(e)} />}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save client'}</button>
+          <button className="btn btn-primary" disabled={create.isPending}>{create.isPending ? 'Saving…' : 'Save client'}</button>
         </div>
       </form>
     </Modal>

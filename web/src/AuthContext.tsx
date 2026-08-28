@@ -5,7 +5,7 @@ import type { AuthResponse, UserDto } from './types'
 
 interface AuthState {
   user: UserDto | null
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string) => Promise<AuthResponse>
   logout: () => void
 }
 
@@ -26,6 +26,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('crm_token', res.data.token)
     localStorage.setItem('crm_user', JSON.stringify(res.data.user))
     setUser(res.data.user)
+    return res.data
   }, [])
 
   const logout = useCallback(() => {

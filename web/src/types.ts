@@ -169,6 +169,26 @@ export interface TicketCommentDto {
   createdAt: string
 }
 
+export interface ClientDetail {
+  id: number
+  name: string
+  contactPerson: string
+  phone: string
+  email: string | null
+  address: string | null
+  city: string | null
+  type: ClientType
+  status: ClientStatus
+  notes: string | null
+  createdAt: string
+  contacts: ClientContact[]
+  payments: PaymentInfo[]
+  subscriptions: SubscriptionDto[]
+  interactions: InteractionDto[]
+  tickets: TicketDto[]
+  followUps: FollowUpDto[]
+}
+
 export interface DashboardStats {
   clientsTotal: number
   clientsByStatus: Record<string, number>

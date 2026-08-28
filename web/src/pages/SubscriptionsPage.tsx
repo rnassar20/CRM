@@ -1,60 +1,38 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { api, errMsg } from '../api'
+import { fieldError, errMsg, fieldErrors } from '../api'
 import { Badge, Empty, ErrorBox, Field, Modal, Spinner } from '../components/ui'
-import { daysUntil, fmtDate, type PagedResult, type PlanDto, type SubscriptionDto } from '../types'
+import { daysUntil, fmtDate, type PlanDto, type SubscriptionDto } from '../types'
+import { useCreateSubscription, useMarkPaid, usePlans, useResendKey, useSubscriptions, useClientOptions } from '../queries'
 
 export default function SubscriptionsPage() {
   const [params] = useSearchParams()
-  const [data, setData] = useState<PagedResult<SubscriptionDto> | null>(null)
-  const [plans, setPlans] = useState<PlanDto[]>([])
   const [expiring, setExpiring] = useState(params.get('expiring') ?? '')
   const [unpaidOnly, setUnpaidOnly] = useState(params.get('unpaid') === '1')
   const [expiredOnly, setExpiredOnly] = useState(params.get('expired') === '1')
   const [page, setPage] = useState(1)
-  const [error, setError] = useState<string | null>(null)
   const [showNew, setShowNew] = useState(false)
   const [keyResult, setKeyResult] = useState<{ licenseKey: string; whatsappStatus: string } | null>(null)
 
-  const load = useCallback(async () => {
-    setError(null)
-    try {
-      const res = await api.get<PagedResult<SubscriptionDto>>('/subscriptions', {
-        params: {
-          expiringInDays: expiring || undefined,
-          paymentStatus: unpaidOnly ? 'Unpaid' : undefined,
-          page,
-          pageSize: 25,
-        },
-      })
-      let items = res.data.items
-      if (expiredOnly) items = items.filter((s) => daysUntil(s.expiryDate) < 0)
-      setData({ ...res.data, items })
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [expiring, unpaidOnly, expiredOnly, page])
+  const { data, error, isLoading } = useSubscriptions({
+    expiringInDays: expiring,
+    paymentStatus: unpaidOnly ? 'Unpaid' : '',
+    page,
+    pageSize: 25,
+  })
+  const { data: plans = [] } = usePlans()
+  const markPaid = useMarkPaid()
 
-  useEffect(() => {
-    load()
-  }, [load])
+  const items = (data?.items ?? []).filter((s) => !expiredOnly || daysUntil(s.expiryDate) < 0)
 
-  useEffect(() => {
-    api.get<PlanDto[]>('/plans').then((r) => setPlans(r.data.filter((p) => p.isActive))).catch(() => {})
-  }, [])
-
-  async function markPaid(s: SubscriptionDto) {
-    setError(null)
-    try {
-      const res = await api.post<{ subscription: SubscriptionDto; whatsappStatus: string; licenseKey: string }>(
-        `/subscriptions/${s.id}/mark-paid`,
-        {},
-      )
-      setKeyResult({ licenseKey: res.data.licenseKey ?? '', whatsappStatus: res.data.whatsappStatus })
-      load()
-    } catch (e) {
-      setError(errMsg(e))
-    }
+  function markPaidClick(s: SubscriptionDto) {
+    markPaid.mutate(s.id, {
+      onSuccess: (res) =>
+        setKeyResult({
+          licenseKey: res.licenseKey ?? '',
+          whatsappStatus: res.whatsappStatus,
+        }),
+    })
   }
 
   return (
@@ -84,12 +62,13 @@ export default function SubscriptionsPage() {
         </label>
       </div>
 
-      {error && <ErrorBox message={error} />}
-      {!data && !error && <Spinner />}
+      {error && <ErrorBox message={errMsg(error)} />}
+      {errMsg(markPaid.error) && <ErrorBox message={errMsg(markPaid.error)} />}
+      {isLoading && !data && <Spinner />}
 
       {data && (
         <>
-          {data.items.length === 0 ? (
+          {items.length === 0 ? (
             <Empty text="No subscriptions match." />
           ) : (
             <table className="table card">
@@ -105,7 +84,7 @@ export default function SubscriptionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.items.map((s) => {
+                {items.map((s) => {
                   const d = daysUntil(s.expiryDate)
                   return (
                     <tr key={s.id}>
@@ -120,7 +99,7 @@ export default function SubscriptionsPage() {
                       <td>{s.licenseKey ? <span title={s.licenseKey}>✓ issued</span> : '-'}</td>
                       <td className="nowrap">
                         {s.paymentStatus === 'Unpaid' ? (
-                          <button className="btn btn-small btn-primary" onClick={() => markPaid(s)}>Mark paid & send key</button>
+                          <button className="btn btn-small btn-primary" onClick={() => markPaidClick(s)}>Mark paid & send key</button>
                         ) : (
                           s.licenseKey && <ResendInline subId={s.id} />
                         )}
@@ -139,7 +118,7 @@ export default function SubscriptionsPage() {
         </>
       )}
 
-      {showNew && <NewSubModal plans={plans} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load() }} />}
+      {showNew && <NewSubModal plans={plans} onClose={() => setShowNew(false)} onSaved={() => setShowNew(false)} />}
 
       {keyResult && (
         <Modal title="Activation key generated" onClose={() => setKeyResult(null)}>
@@ -153,20 +132,11 @@ export default function SubscriptionsPage() {
 }
 
 function ResendInline({ subId }: { subId: number }) {
-  const [msg, setMsg] = useState<string | null>(null)
+  const resend = useResendKey()
+  const msg = resend.isPending ? 'sending…' : resend.isSuccess ? 'resent ✓' : resend.isError ? errMsg(resend.error) : null
   return (
     <>
-      <button
-        className="btn btn-small"
-        onClick={async () => {
-          try {
-            await api.post(`/subscriptions/${subId}/resend-key`, {})
-            setMsg('resent ✓')
-          } catch (e) {
-            setMsg(errMsg(e))
-          }
-        }}
-      >
+      <button className="btn btn-small" onClick={() => resend.mutate(subId)}>
         Resend key
       </button>
       {msg && <div className="muted small">{msg}</div>}
@@ -175,76 +145,68 @@ function ResendInline({ subId }: { subId: number }) {
 }
 
 function NewSubModal({ plans, onClose, onSaved }: { plans: PlanDto[]; onClose: () => void; onSaved: () => void }) {
-  const [clients, setClients] = useState<{ id: number; name: string }[]>([])
+  const { data: clients = [] } = useClientOptions()
   const [clientId, setClientId] = useState('')
   const [planId, setPlanId] = useState(plans[0]?.id ?? 0)
   const [price, setPrice] = useState(String(plans[0]?.price ?? ''))
   const [startDate, setStartDate] = useState('')
   const [notes, setNotes] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const create = useCreateSubscription()
 
-  useEffect(() => {
-    api
-      .get<PagedResult<{ id: number; name: string }>>('/clients', { params: { pageSize: 100 } })
-      .then((r) => setClients(r.data.items))
-      .catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    const p = plans.find((x) => x.id === planId)
+  function onPlanChange(id: number) {
+    setPlanId(id)
+    const p = plans.find((x) => x.id === id)
     if (p) setPrice(String(p.price))
-  }, [planId, plans])
+  }
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault()
-    if (!clientId) return setError('Select a client.')
-    setError(null)
-    try {
-      await api.post('/subscriptions', {
+    if (!clientId) return
+    create.mutate(
+      {
         clientId: Number(clientId),
         planId,
         price: price ? Number(price) : null,
         startDate: startDate ? new Date(startDate).toISOString() : null,
         notes: notes || null,
-      })
-      onSaved()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+      },
+      { onSuccess: onSaved },
+    )
   }
 
+  const e = create.error
   return (
     <Modal title="Create / renew subscription" onClose={onClose}>
       <p className="muted small">Without a start date the renewal stacks after the client's current expiry.</p>
       <form onSubmit={submit} className="form-grid">
-        <Field label="Client *">
-          <select value={clientId} onChange={(e) => setClientId(e.target.value)} required>
+        <Field label="Client *" error={fieldError(e, 'clientId')}>
+          <select value={clientId} onChange={(ev) => setClientId(ev.target.value)} required>
             <option value="">— select —</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
         </Field>
-        <Field label="Plan *">
-          <select value={planId} onChange={(e) => setPlanId(Number(e.target.value))}>
+        <Field label="Plan *" error={fieldError(e, 'planId')}>
+          <select value={planId} onChange={(ev) => onPlanChange(Number(ev.target.value))}>
             {plans.map((p) => (
               <option key={p.id} value={p.id}>{p.name} ({p.cycle})</option>
             ))}
           </select>
         </Field>
-        <Field label="Price">
-          <input type="number" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
+        <Field label="Price" error={fieldError(e, 'price') ?? fieldError(e, 'Price')}>
+          <input type="number" step="0.01" value={price} onChange={(ev) => setPrice(ev.target.value)} />
         </Field>
         <Field label="Start date (optional)">
-          <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          <input type="date" value={startDate} onChange={(ev) => setStartDate(ev.target.value)} />
         </Field>
         <Field label="Notes">
-          <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <textarea rows={2} value={notes} onChange={(ev) => setNotes(ev.target.value)} />
         </Field>
-        {error && <ErrorBox message={error} />}
+        {errMsg(e) && !fieldErrors(e) && <ErrorBox message={errMsg(e)} />}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary">Create</button>
+          <button className="btn btn-primary" disabled={create.isPending}>Create</button>
         </div>
       </form>
     </Modal>

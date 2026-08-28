@@ -74,11 +74,12 @@ export function Modal({
   )
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, children, error }: { label: string; children: ReactNode; error?: string | null }) {
   return (
-    <label className="field">
+    <label className={`field ${error ? 'field-error' : ''}`}>
       <span>{label}</span>
       {children}
+      {error && <span className="field-err">{error}</span>}
     </label>
   )
 }

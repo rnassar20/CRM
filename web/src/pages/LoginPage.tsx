@@ -1,28 +1,28 @@
 import { type FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { errMsg } from '../api'
+import { useMutation } from '@tanstack/react-query'
+import { fieldError, errMsg } from '../api'
 import { useAuth } from '../AuthContext'
+import { Field } from '../components/ui'
 
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
 
-  async function submit(e: FormEvent) {
+  const mutation = useMutation({
+    mutationFn: () => login(email.trim(), password),
+    onSuccess: () => navigate('/'),
+  })
+
+  const err = errMsg(mutation.error)
+  const emailErr = fieldError(mutation.error, 'email') ?? fieldError(mutation.error, 'Email')
+  const pwErr = fieldError(mutation.error, 'password') ?? fieldError(mutation.error, 'Password')
+
+  function submit(e: FormEvent) {
     e.preventDefault()
-    setError(null)
-    setBusy(true)
-    try {
-      await login(email.trim(), password)
-      navigate('/')
-    } catch (err) {
-      setError(errMsg(err))
-    } finally {
-      setBusy(false)
-    }
+    mutation.mutate()
   }
 
   return (
@@ -32,17 +32,15 @@ export default function LoginPage() {
           ERP<span>CRM</span>
         </div>
         <p className="login-sub">Client & subscription management</p>
-        <label className="field">
-          <span>Email</span>
+        <Field label="Email" error={emailErr}>
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
-        </label>
-        <label className="field">
-          <span>Password</span>
+        </Field>
+        <Field label="Password" error={pwErr}>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        </label>
-        {error && <div className="error-box">{error}</div>}
-        <button className="btn btn-primary btn-block" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
+        </Field>
+        {err && !emailErr && !pwErr && <div className="error-box">{err}</div>}
+        <button className="btn btn-primary btn-block" disabled={mutation.isPending}>
+          {mutation.isPending ? 'Signing in…' : 'Sign in'}
         </button>
         <p className="login-hint">Seeded dev account: admin@crm.local / Admin@123</p>
       </form>

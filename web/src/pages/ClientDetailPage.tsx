@@ -1,6 +1,6 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, errMsg } from '../api'
+import { fieldError, errMsg } from '../api'
 import { Badge, Empty, ErrorBox, Field, Modal, Spinner } from '../components/ui'
 import {
   daysUntil,
@@ -8,64 +8,44 @@ import {
   fmtDateTime,
   toLocalInputPlusDays,
   type ClientContact,
+  type ClientDetail,
   type ClientType,
   type ClientStatus,
   type FollowUpType,
   type InteractionOutcome,
   type InteractionType,
-  type PaymentInfo,
   type PlanDto,
-  type SubscriptionDto,
 } from '../types'
+import {
+  useCancelFollowUp,
+  useClient,
+  useCompleteFollowUp,
+  useCreateContact,
+  useCreateFollowUp,
+  useCreateInteraction,
+  useCreateSubscription,
+  useDeleteContact,
+  useMarkPaid,
+  usePlans,
+  useResendKey,
+  useUpdateClient,
+  useUpdateContact,
+} from '../queries'
 
 const CLIENT_TYPES: ClientType[] = ['Pharmacy', 'GiftShop', 'DoctorClinic', 'Hospital', 'Other']
 const CLIENT_STATUSES: ClientStatus[] = ['Potential', 'Contacted', 'Interested', 'NotInterested', 'Subscribed']
 const INTERACTION_TYPES: InteractionType[] = ['Call', 'WhatsApp', 'Email', 'Visit', 'Sms']
 const OUTCOMES: InteractionOutcome[] = ['NoAnswer', 'CallbackRequested', 'Interested', 'NotInterested', 'DealClosed', 'InfoOnly']
 
-type ClientDetail = {
-  id: number
-  name: string
-  contactPerson: string
-  phone: string
-  email: string | null
-  address: string | null
-  city: string | null
-  type: ClientType
-  status: ClientStatus
-  notes: string | null
-  createdAt: string
-  contacts: ClientContact[]
-  payments: PaymentInfo[]
-  subscriptions: SubscriptionDto[]
-  interactions: import('../types').InteractionDto[]
-  tickets: import('../types').TicketDto[]
-  followUps: import('../types').FollowUpDto[]
-}
-
 export default function ClientDetailPage() {
   const { id } = useParams()
-  const [client, setClient] = useState<ClientDetail | null>(null)
-  const [plans, setPlans] = useState<PlanDto[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const clientId = Number(id)
+  const { data: client, error, isLoading } = useClient(clientId)
+  const { data: plans = [] } = usePlans()
   const [tab, setTab] = useState<'interactions' | 'agenda' | 'subscriptions' | 'payments' | 'contacts' | 'tickets'>('interactions')
 
-  const load = useCallback(async () => {
-    try {
-      const res = await api.get<ClientDetail>(`/clients/${id}`)
-      setClient(res.data)
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [id])
-
-  useEffect(() => {
-    load()
-    api.get<PlanDto[]>('/plans').then((r) => setPlans(r.data.filter((p) => p.isActive))).catch(() => {})
-  }, [load])
-
-  if (error) return <ErrorBox message={error} />
-  if (!client) return <Spinner />
+  if (error) return <ErrorBox message={errMsg(error)} />
+  if (isLoading || !client) return <Spinner />
 
   return (
     <>
@@ -80,7 +60,7 @@ export default function ClientDetailPage() {
             {client.email ? ` · ${client.email}` : ''} {client.city ? `· ${client.city}` : ''}
           </p>
         </div>
-        <EditClientButton client={client} onSaved={load} />
+        <EditClientButton client={client} />
       </div>
 
       <div className="tabs">
@@ -96,11 +76,11 @@ export default function ClientDetailPage() {
         ))}
       </div>
 
-      {tab === 'interactions' && <InteractionsTab client={client} reload={load} />}
-      {tab === 'agenda' && <AgendaTab client={client} reload={load} />}
-      {tab === 'subscriptions' && <SubscriptionsTab client={client} plans={plans} reload={load} />}
+      {tab === 'interactions' && <InteractionsTab client={client} />}
+      {tab === 'agenda' && <AgendaTab client={client} />}
+      {tab === 'subscriptions' && <SubscriptionsTab client={client} plans={plans} />}
       {tab === 'payments' && <PaymentsTab client={client} />}
-      {tab === 'contacts' && <ContactsTab client={client} reload={load} />}
+      {tab === 'contacts' && <ContactsTab client={client} />}
       {tab === 'tickets' && <TicketsTab client={client} />}
     </>
   )
@@ -108,7 +88,7 @@ export default function ClientDetailPage() {
 
 /* ---------------- Call log ---------------- */
 
-function InteractionsTab({ client, reload }: { client: ClientDetail; reload: () => void }) {
+function InteractionsTab({ client }: { client: ClientDetail }) {
   const [form, setForm] = useState({
     type: 'Call',
     outcome: 'Interested',
@@ -116,29 +96,21 @@ function InteractionsTab({ client, reload }: { client: ClientDetail; reload: () 
     nextFollowUpAt: '',
     newClientStatus: '',
   })
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const create = useCreateInteraction(client.id)
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
-      await api.post('/interactions', {
+    create.mutate(
+      {
         clientId: client.id,
         type: form.type,
         outcome: form.outcome,
         notes: form.notes || null,
         nextFollowUpAt: form.nextFollowUpAt ? new Date(form.nextFollowUpAt).toISOString() : null,
         newClientStatus: form.newClientStatus || null,
-      })
-      setForm({ ...form, notes: '', nextFollowUpAt: '', newClientStatus: '' })
-      reload()
-    } catch (err) {
-      setError(errMsg(err))
-    } finally {
-      setBusy(false)
-    }
+      },
+      { onSuccess: () => setForm({ ...form, notes: '', nextFollowUpAt: '', newClientStatus: '' }) },
+    )
   }
 
   return (
@@ -178,9 +150,9 @@ function InteractionsTab({ client, reload }: { client: ClientDetail; reload: () 
           <Field label="Notes">
             <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </Field>
-          {error && <ErrorBox message={error} />}
+          {errMsg(create.error) && <ErrorBox message={errMsg(create.error)} />}
           <div className="modal-actions">
-            <button className="btn btn-primary" disabled={busy}>{busy ? 'Saving…' : 'Save interaction'}</button>
+            <button className="btn btn-primary" disabled={create.isPending}>{create.isPending ? 'Saving…' : 'Save interaction'}</button>
           </div>
         </form>
       </section>
@@ -222,7 +194,7 @@ function InteractionsTab({ client, reload }: { client: ClientDetail; reload: () 
 
 /* ---------------- Agenda ---------------- */
 
-function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => void }) {
+function AgendaTab({ client }: { client: ClientDetail }) {
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -230,35 +202,30 @@ function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => voi
     type: 'Marketing' as FollowUpType,
     ticketId: '',
   })
-  const [error, setError] = useState<string | null>(null)
+  const create = useCreateFollowUp(client.id)
+  const complete = useCompleteFollowUp(client.id)
+  const cancel = useCancelFollowUp(client.id)
+  const actErr = errMsg(complete.error) || errMsg(cancel.error)
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault()
-    if (form.type === 'Support' && !form.ticketId) return setError('Support follow-ups need a ticket.')
-    setError(null)
-    try {
-      await api.post('/followups', {
+    if (form.type === 'Support' && !form.ticketId) return
+    create.mutate(
+      {
         clientId: client.id,
         title: form.title,
         description: form.description || null,
         scheduledAt: new Date(form.scheduledAt).toISOString(),
         type: form.type,
         ticketId: form.type === 'Support' && form.ticketId ? Number(form.ticketId) : null,
-      })
-      setForm({ ...form, title: '', description: '', ticketId: '' })
-      reload()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+      },
+      { onSuccess: () => setForm({ ...form, title: '', description: '', ticketId: '' }) },
+    )
   }
 
-  async function act(id: number, action: 'complete' | 'cancel') {
-    try {
-      await api.patch(`/followups/${id}/${action}`)
-      reload()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+  function act(id: number, action: 'complete' | 'cancel') {
+    if (action === 'complete') complete.mutate(id)
+    else cancel.mutate(id)
   }
 
   return (
@@ -301,9 +268,10 @@ function AgendaTab({ client, reload }: { client: ClientDetail; reload: () => voi
             <textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
               placeholder={form.type === 'Internal' ? 'Build/version notes…' : undefined} />
           </Field>
-          {error && <ErrorBox message={error} />}
+          {errMsg(create.error) && <ErrorBox message={errMsg(create.error)} />}
+          {actErr && <ErrorBox message={actErr} />}
           <div className="modal-actions">
-            <button className="btn btn-primary">Add to agenda</button>
+            <button className="btn btn-primary" disabled={create.isPending}>Add to agenda</button>
           </div>
         </form>
       </section>
@@ -401,52 +369,38 @@ function PaymentsTab({ client }: { client: ClientDetail }) {
 type ContactForm = { name: string; phone: string; email: string; notes: string; allowWhatsApp: boolean }
 const EMPTY_CONTACT: ContactForm = { name: '', phone: '', email: '', notes: '', allowWhatsApp: false }
 
-function ContactsTab({ client, reload }: { client: ClientDetail; reload: () => void }) {
+function ContactsTab({ client }: { client: ClientDetail }) {
   const [form, setForm] = useState<ContactForm>(EMPTY_CONTACT)
   const [editingId, setEditingId] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const create = useCreateContact(client.id)
+  const update = useUpdateContact(client.id)
+  const remove = useDeleteContact(client.id)
+  const formErr = errMsg(create.error) || errMsg(update.error) || errMsg(remove.error)
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault()
-    setError(null)
     const payload = { ...form, email: form.email || null }
-    try {
-      if (editingId) {
-        await api.put(`/clients/${client.id}/contacts/${editingId}`, payload)
-      } else {
-        await api.post(`/clients/${client.id}/contacts`, payload)
-      }
+    const onOk = () => {
       setForm(EMPTY_CONTACT)
       setEditingId(null)
-      reload()
-    } catch (err) {
-      setError(errMsg(err))
     }
+    if (editingId) update.mutate({ id: editingId, body: payload }, { onSuccess: onOk })
+    else create.mutate(payload, { onSuccess: onOk })
   }
 
-  async function remove(id: number) {
-    try {
-      await api.delete(`/clients/${client.id}/contacts/${id}`)
-      if (editingId === id) { setEditingId(null); setForm(EMPTY_CONTACT) }
-      reload()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+  function removeContact(id: number) {
+    remove.mutate(id, {
+      onSuccess: () => {
+        if (editingId === id) { setEditingId(null); setForm(EMPTY_CONTACT) }
+      },
+    })
   }
 
-  async function toggleWhatsApp(c: ClientContact) {
-    try {
-      await api.put(`/clients/${client.id}/contacts/${c.id}`, {
-        name: c.name,
-        phone: c.phone,
-        email: c.email,
-        notes: c.notes,
-        allowWhatsApp: !c.allowWhatsApp,
-      })
-      reload()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+  function toggleWhatsApp(c: ClientContact) {
+    update.mutate({
+      id: c.id,
+      body: { name: c.name, phone: c.phone, email: c.email, notes: c.notes, allowWhatsApp: !c.allowWhatsApp },
+    })
   }
 
   function startEdit(c: ClientContact) {
@@ -480,14 +434,16 @@ function ContactsTab({ client, reload }: { client: ClientDetail; reload: () => v
             />
             Send WhatsApp notifications
           </label>
-          {error && <ErrorBox message={error} />}
+          {formErr && <ErrorBox message={formErr} />}
           <div className="modal-actions">
             {editingId && (
               <button type="button" className="btn" onClick={() => { setEditingId(null); setForm(EMPTY_CONTACT) }}>
                 Cancel edit
               </button>
             )}
-            <button className="btn btn-primary">{editingId ? 'Save changes' : 'Add contact'}</button>
+            <button className="btn btn-primary" disabled={create.isPending || update.isPending}>
+              {editingId ? 'Save changes' : 'Add contact'}
+            </button>
           </div>
         </form>
       </section>
@@ -523,7 +479,7 @@ function ContactsTab({ client, reload }: { client: ClientDetail; reload: () => v
                   </td>
                   <td className="nowrap">
                     <button className="btn btn-small" onClick={() => startEdit(c)}>✎ Edit</button>{' '}
-                    <button className="btn btn-small" onClick={() => remove(c.id)}>Delete</button>
+                    <button className="btn btn-small" onClick={() => removeContact(c.id)}>Delete</button>
                   </td>
                 </tr>
               ))}
@@ -537,23 +493,19 @@ function ContactsTab({ client, reload }: { client: ClientDetail; reload: () => v
 
 /* ---------------- Subscriptions ---------------- */
 
-function SubscriptionsTab({ client, plans, reload }: { client: ClientDetail; plans: PlanDto[]; reload: () => void }) {
+function SubscriptionsTab({ client, plans }: { client: ClientDetail; plans: PlanDto[] }) {
   const [showNew, setShowNew] = useState(false)
   const [keyResult, setKeyResult] = useState<{ licenseKey: string; whatsappStatus: string } | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const markPaid = useMarkPaid(client.id)
 
-  async function markPaid(subId: number) {
-    setError(null)
-    try {
-      const res = await api.post<{ subscription: SubscriptionDto; whatsappStatus: string; licenseKey: string }>(
-        `/subscriptions/${subId}/mark-paid`,
-        {},
-      )
-      setKeyResult({ licenseKey: res.data.licenseKey ?? res.data.subscription.licenseKey ?? '', whatsappStatus: res.data.whatsappStatus })
-      reload()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+  function markPaidClick(subId: number) {
+    markPaid.mutate(subId, {
+      onSuccess: (res) =>
+        setKeyResult({
+          licenseKey: res.licenseKey ?? res.subscription.licenseKey ?? '',
+          whatsappStatus: res.whatsappStatus,
+        }),
+    })
   }
 
   return (
@@ -564,7 +516,7 @@ function SubscriptionsTab({ client, plans, reload }: { client: ClientDetail; pla
           + New / renew subscription
         </button>
       </div>
-      {error && <ErrorBox message={error} />}
+      {errMsg(markPaid.error) && <ErrorBox message={errMsg(markPaid.error)} />}
 
       {client.subscriptions.length === 0 ? (
         <Empty text="No subscriptions yet." />
@@ -595,7 +547,7 @@ function SubscriptionsTab({ client, plans, reload }: { client: ClientDetail; pla
                   <td className="mono wrap">{s.licenseKey ?? '-'}</td>
                   <td className="nowrap">
                     {s.paymentStatus === 'Unpaid' && (
-                      <button className="btn btn-small btn-primary" onClick={() => markPaid(s.id)}>Mark paid & send key</button>
+                      <button className="btn btn-small btn-primary" onClick={() => markPaidClick(s.id)}>Mark paid & send key</button>
                     )}
                     {s.licenseKey && s.paymentStatus === 'Paid' && (
                       <ResendButton subId={s.id} />
@@ -609,7 +561,7 @@ function SubscriptionsTab({ client, plans, reload }: { client: ClientDetail; pla
       )}
 
       {showNew && (
-        <NewSubscriptionModal clientId={client.id} plans={plans} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); reload() }} />
+        <NewSubscriptionModal clientId={client.id} plans={plans} onClose={() => setShowNew(false)} onSaved={() => setShowNew(false)} />
       )}
       {keyResult && (
         <Modal title="Payment received - activation key" onClose={() => setKeyResult(null)}>
@@ -623,20 +575,15 @@ function SubscriptionsTab({ client, plans, reload }: { client: ClientDetail; pla
 }
 
 function ResendButton({ subId }: { subId: number }) {
-  const [msg, setMsg] = useState<string | null>(null)
+  const resend = useResendKey()
+  const msg = resend.isSuccess
+    ? `Key resent (${resend.data?.sent ? resend.data?.status : 'no phone'})`
+    : resend.isError
+      ? errMsg(resend.error)
+      : null
   return (
     <>
-      <button
-        className="btn btn-small"
-        onClick={async () => {
-          try {
-            const r = await api.post<{ status?: string; sent?: boolean }>(`/subscriptions/${subId}/resend-key`, {})
-            setMsg(`Key resent (${r.data.sent ? r.data.status : 'no phone'})`)
-          } catch (e) {
-            setMsg(errMsg(e))
-          }
-        }}
-      >
+      <button className="btn btn-small" onClick={() => resend.mutate(subId)} disabled={resend.isPending}>
         Resend key
       </button>
       {msg && <div className="muted small">{msg}</div>}
@@ -659,28 +606,26 @@ function NewSubscriptionModal({
   const [price, setPrice] = useState(String(plans[0]?.price ?? ''))
   const [startDate, setStartDate] = useState('')
   const [notes, setNotes] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const create = useCreateSubscription(clientId)
 
-  useEffect(() => {
-    const p = plans.find((x) => x.id === planId)
+  function onPlanChange(id: number) {
+    setPlanId(id)
+    const p = plans.find((x) => x.id === id)
     if (p) setPrice(String(p.price))
-  }, [planId, plans])
+  }
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault()
-    setError(null)
-    try {
-      await api.post('/subscriptions', {
+    create.mutate(
+      {
         clientId,
         planId,
         price: price ? Number(price) : null,
         startDate: startDate ? new Date(startDate).toISOString() : null,
         notes: notes || null,
-      })
-      onSaved()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+      },
+      { onSuccess: onSaved },
+    )
   }
 
   return (
@@ -688,7 +633,7 @@ function NewSubscriptionModal({
       <p className="muted small">Without a start date the renewal stacks after the current expiry.</p>
       <form onSubmit={submit} className="form-grid">
         <Field label="Plan *">
-          <select value={planId} onChange={(e) => setPlanId(Number(e.target.value))}>
+          <select value={planId} onChange={(e) => onPlanChange(Number(e.target.value))}>
             {plans.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name} ({p.cycle})
@@ -705,10 +650,10 @@ function NewSubscriptionModal({
         <Field label="Notes">
           <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
-        {error && <ErrorBox message={error} />}
+        {errMsg(create.error) && <ErrorBox message={errMsg(create.error)} />}
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary">Create</button>
+          <button className="btn btn-primary" disabled={create.isPending}>Create</button>
         </div>
       </form>
     </Modal>
@@ -748,7 +693,7 @@ function TicketsTab({ client }: { client: ClientDetail }) {
 
 /* ---------------- Edit client ---------------- */
 
-function EditClientButton({ client, onSaved }: { client: ClientDetail; onSaved: () => void }) {
+function EditClientButton({ client }: { client: ClientDetail }) {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({
     name: client.name,
@@ -761,22 +706,18 @@ function EditClientButton({ client, onSaved }: { client: ClientDetail; onSaved: 
     status: client.status,
     notes: client.notes ?? '',
   })
-  const [error, setError] = useState<string | null>(null)
+  const update = useUpdateClient(client.id)
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault()
-    setError(null)
-    try {
-      await api.put(`/clients/${client.id}`, { ...form, email: form.email || null })
-      setOpen(false)
-      onSaved()
-    } catch (err) {
-      setError(errMsg(err))
-    }
+    update.mutate({ ...form, email: form.email || null }, { onSuccess: () => setOpen(false) })
   }
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm({ ...form, [k]: e.target.value })
+
+  const e = update.error
+  const fe = (f: string) => fieldError(e, f) ?? fieldError(e, f.charAt(0).toUpperCase() + f.slice(1))
 
   return (
     <>
@@ -784,16 +725,16 @@ function EditClientButton({ client, onSaved }: { client: ClientDetail; onSaved: 
       {open && (
         <Modal title={`Edit ${client.name}`} onClose={() => setOpen(false)}>
           <form onSubmit={submit} className="form-grid">
-            <Field label="Name *"><input value={form.name} onChange={set('name')} required /></Field>
-            <Field label="Contact person"><input value={form.contactPerson} onChange={set('contactPerson')} /></Field>
-            <Field label="Phone *"><input value={form.phone} onChange={set('phone')} required /></Field>
-            <Field label="Email"><input type="email" value={form.email} onChange={set('email')} /></Field>
-            <Field label="Type *">
+            <Field label="Name *" error={fe('name')}><input value={form.name} onChange={set('name')} required /></Field>
+            <Field label="Contact person" error={fe('contactPerson')}><input value={form.contactPerson} onChange={set('contactPerson')} /></Field>
+            <Field label="Phone *" error={fe('phone')}><input value={form.phone} onChange={set('phone')} required /></Field>
+            <Field label="Email" error={fe('email')}><input type="email" value={form.email} onChange={set('email')} /></Field>
+            <Field label="Type *" error={fe('type')}>
               <select value={form.type} onChange={set('type')}>
                 {CLIENT_TYPES.map((t) => <option key={t}>{t}</option>)}
               </select>
             </Field>
-            <Field label="Status *">
+            <Field label="Status *" error={fe('status')}>
               <select value={form.status} onChange={set('status')}>
                 {CLIENT_STATUSES.map((s) => <option key={s}>{s}</option>)}
               </select>
@@ -801,10 +742,10 @@ function EditClientButton({ client, onSaved }: { client: ClientDetail; onSaved: 
             <Field label="City"><input value={form.city} onChange={set('city')} /></Field>
             <Field label="Address"><input value={form.address} onChange={set('address')} /></Field>
             <Field label="Notes"><textarea rows={2} value={form.notes} onChange={set('notes')} /></Field>
-            {error && <ErrorBox message={error} />}
+            {errMsg(e) && <ErrorBox message={errMsg(e)} />}
             <div className="modal-actions">
               <button type="button" className="btn" onClick={() => setOpen(false)}>Cancel</button>
-              <button className="btn btn-primary">Save changes</button>
+              <button className="btn btn-primary" disabled={update.isPending}>Save changes</button>
             </div>
           </form>
         </Modal>
