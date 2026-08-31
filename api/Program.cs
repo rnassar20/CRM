@@ -1,13 +1,20 @@
 using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
+using Crm.Api.Controllers;
 using Crm.Api.Data;
+using Crm.Api.Models;
 using Crm.Api.Services;
 using Crm.Api.Services.WhatsApp;
+using Hangfire;
+using Hangfire.Dashboard;
+using Hangfire.PostgreSql;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,12 +50,25 @@ builder.Services
             RoleClaimType = "role",
             ClockSkew = TimeSpan.FromMinutes(1)
         };
+    })
+    // Browser session used only by the Hangfire dashboard (separate from the API's JWT).
+    .AddCookie(DashboardAuthController.CookieScheme, o =>
+    {
+        o.Cookie.Name = "crm_dashboard_auth";
+        o.Cookie.HttpOnly = true;
+        o.Cookie.SameSite = SameSiteMode.Lax;
+        o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        o.ExpireTimeSpan = TimeSpan.FromHours(8);
+        o.SlidingExpiration = true;
+        o.LoginPath = "/dashboard/login";
+        o.AccessDeniedPath = "/dashboard/login?error=Admin+role+required";
     });
 builder.Services.AddAuthorization();
 
 // application services
 builder.Services.AddScoped<JwtTokenService>();
 builder.Services.AddScoped<ILicenseKeyService, LicenseKeyService>();
+builder.Services.AddScoped<ReminderJobs>();
 builder.Services.AddSingleton<LoggingWhatsAppSender>();
 builder.Services.AddHttpClient<MetaCloudWhatsAppSender>();
 builder.Services.AddScoped<IWhatsAppSender>(sp =>
@@ -58,7 +78,28 @@ builder.Services.AddScoped<IWhatsAppSender>(sp =>
         ? sp.GetRequiredService<MetaCloudWhatsAppSender>()
         : sp.GetRequiredService<LoggingWhatsAppSender>();
 });
-builder.Services.AddHostedService<ReminderWorker>();
+
+// Hangfire replaces the ReminderWorker BackgroundService. Storage lives in the same
+// Postgres database (hangfire.* schema) so no new infrastructure is required.
+builder.Services.AddHangfire(cfg => cfg
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UsePostgreSqlStorage(
+        // Resolve the connection string lazily so test hosts (which override config after
+        // service registration) and env-injected secrets are picked up when the server starts.
+        o => o.UseConnectionFactory(new ConfigConnectionFactory(() => builder.Configuration.GetConnectionString("Default"))),
+        new PostgreSqlStorageOptions
+        {
+            // keep Hangfire's internal tables out of the app's "public" schema
+            SchemaName = "hangfire"
+        }));
+builder.Services.AddHangfireServer(o =>
+{
+    // reminder sends are throttled by the WhatsApp provider; don't fan out 5*CPU jobs
+    o.WorkerCount = 2;
+    o.SchedulePollingInterval = TimeSpan.FromSeconds(15);
+});
 
 // Per-client-IP throttling for the login endpoint (brute-force protection).
 // Fixed window: 10 attempts per 15 minutes. Partitioned by remote IP address.
@@ -134,6 +175,15 @@ using (var scope = app.Services.CreateScope())
     DbSeeder.Seed(db);
 }
 
+// Register the periodic jobs the old ReminderWorker loop used to run.
+// AddOrUpdate is idempotent by id, so restarting the app never queues duplicates.
+using (var scope = app.Services.CreateScope())
+{
+    var recurring = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+    recurring.AddOrUpdate<ReminderJobs>("expiry-reminders", j => j.RunExpiryRemindersAsync(), Cron.HourInterval(6));
+    recurring.AddOrUpdate<ReminderJobs>("follow-up-processing", j => j.RunFollowUpProcessingAsync(), Cron.HourInterval(6));
+}
+
 // Central error handling: unhandled exceptions become RFC 7807 ProblemDetails (no stack traces).
 app.Use(async (context, next) =>
 {
@@ -165,6 +215,13 @@ app.UseCors(CorsPolicy);
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Hangfire dashboard: jobs, retries, recurring schedules, and server status.
+// Restricted to authenticated Admin users via a cookie session (see DashboardAuthController).
+app.UseHangfireDashboard("/hangfire", new DashboardOptions
+{
+    Authorization = [new HangfireDashboardAuthFilter()]
+});
 app.MapControllers();
 
 app.Run();
@@ -208,5 +265,47 @@ static void ValidateRequiredSecrets(IConfiguration config)
 }
 
 internal record CheckError(string Key, string Env, string Reason);
+
+/// <summary>Creates a fresh Npgsql connection per call using a lazily-resolved connection string.</summary>
+file sealed class ConfigConnectionFactory(Func<string?> connectionString) : Hangfire.PostgreSql.IConnectionFactory
+{
+    public NpgsqlConnection GetOrCreateConnection()
+    {
+        var cs = connectionString()
+            ?? throw new InvalidOperationException("ConnectionStrings:Default is not configured for Hangfire storage");
+        return new NpgsqlConnection(cs);
+    }
+}
+
+/// <summary>
+/// Allows only authenticated Admin users onto the Hangfire dashboard. Unauthenticated requests
+/// are redirected to the cookie login page at /dashboard/login (the redirect is deferred to
+/// OnStarting so it isn't overwritten by the dashboard middleware's 401).
+/// </summary>
+file sealed class HangfireDashboardAuthFilter : IDashboardAuthorizationFilter
+{
+    public bool Authorize(DashboardContext context)
+    {
+        var http = context.GetHttpContext();
+
+        // UseAuthentication only runs the default (JWT) scheme, so authenticate the
+        // dashboard cookie scheme explicitly here.
+        var auth = http.AuthenticateAsync(DashboardAuthController.CookieScheme).GetAwaiter().GetResult();
+        if (auth.Succeeded && auth.Principal.IsInRole(UserRole.Admin.ToString()))
+            return true;
+
+        var path = http.Request.Path.Value;
+        var returnUrl = Uri.EscapeDataString(string.IsNullOrEmpty(path) ? "/hangfire" : path);
+        var destination = auth.Succeeded
+            ? $"/dashboard/login?error={Uri.EscapeDataString("Admin role required")}" // logged in but not an Admin
+            : $"/dashboard/login?ReturnUrl={returnUrl}";                             // not logged in at all
+        http.Response.OnStarting(() =>
+        {
+            http.Response.Redirect(destination, false);
+            return Task.CompletedTask;
+        });
+        return false;
+    }
+}
 
 public partial class Program;

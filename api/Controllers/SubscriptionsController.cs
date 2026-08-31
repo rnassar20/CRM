@@ -159,7 +159,7 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
     /// <summary>Sends a pre-formatted body to the primary contact plus every opted-in client contact.</summary>
     private async Task<(int Sent, string Status)> SendToRecipientsAsync(Subscription sub, string bodyTemplate, string tag, CancellationToken ct)
     {
-        var recipients = ReminderWorker.Recipients(sub.Client).ToList();
+        var recipients = ReminderJobs.Recipients(sub.Client).ToList();
         if (recipients.Count == 0) return (0, "Skipped");
 
         var sent = 0;
@@ -167,7 +167,7 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
         foreach (var (phone, name) in recipients)
         {
             var body = name is null ? bodyTemplate : bodyTemplate.Replace("{contact}", name);
-            var msg = await ReminderWorker.QueueAndSendAsync(db, sender, phone, body, sub.ClientId, sub.Id, tag, ct);
+            var msg = await ReminderJobs.QueueAndSendAsync(db, sender, phone, body, sub.ClientId, sub.Id, tag, ct);
             if (msg.Status == WhatsAppStatus.Sent) sent++;
             last = msg.Status;
         }
