@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
+using Crm.Api;
 using Crm.Api.Controllers;
 using Crm.Api.Data;
 using Crm.Api.Models;
@@ -141,6 +143,17 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+    var cid = CorrelationIdMiddleware.CorrelationId(context);
+    using (logger.BeginScope(new Dictionary<string, object>(1) { ["RequestId"] = cid }))
+    {
+        await next(context);
+    }
+});
+
 ValidateRequiredSecrets(app.Configuration);
 
 // migrate database + seed demo data on first run
@@ -172,7 +185,8 @@ using (var scope = app.Services.CreateScope())
     }
 
     db.Database.Migrate();
-    DbSeeder.Seed(db);
+    if (app.Environment.IsDevelopment())
+        DbSeeder.Seed(db);
 }
 
 // Register the periodic jobs the old ReminderWorker loop used to run.
@@ -261,6 +275,39 @@ static void ValidateRequiredSecrets(IConfiguration config)
         {
             errors.Add(new CheckError(key, env, $"{what} must be at least {minLength} characters"));
         }
+    }
+}
+
+// If the app is configured to use the real WhatsApp provider, fail fast when its
+// credentials are missing or still placeholders — otherwise the app starts "working"
+// but sends nothing, which is worse than refusing to start.
+{
+    var provider = builder.Configuration["WhatsApp:Provider"]?.Trim();
+    if (provider is not null && provider.Equals("MetaCloud", StringComparison.OrdinalIgnoreCase))
+    {
+        static string Resolve(IConfiguration cfg, string key) => cfg[key]?.Trim() ?? "";
+        var accessToken = Resolve(builder.Configuration, "WhatsApp:MetaCloud:AccessToken");
+        var phoneNumberId = Resolve(builder.Configuration, "WhatsApp:MetaCloud:PhoneNumberId");
+        var wErrors = new List<CheckError>();
+        if (string.IsNullOrEmpty(accessToken))
+            wErrors.Add(new CheckError("WhatsApp:MetaCloud:AccessToken", "WhatsApp__MetaCloud__AccessToken",
+                "Meta Cloud access token is missing (set WhatsApp__MetaCloud__AccessToken)"));
+        else if (accessToken.Contains("change_me", StringComparison.OrdinalIgnoreCase)
+                 || accessToken.Contains("DEV_ONLY", StringComparison.OrdinalIgnoreCase)
+                 || accessToken.Length < 10)
+            wErrors.Add(new CheckError("WhatsApp:MetaCloud:AccessToken", "WhatsApp__MetaCloud__AccessToken",
+                "Meta Cloud access token looks like a placeholder"));
+        if (string.IsNullOrEmpty(phoneNumberId))
+            wErrors.Add(new CheckError("WhatsApp:MetaCloud:PhoneNumberId", "WhatsApp__MetaCloud__PhoneNumberId",
+                "Meta Cloud phone number ID is missing (set WhatsApp__MetaCloud__PhoneNumberId)"));
+        else if (phoneNumberId.Contains("change_me", StringComparison.OrdinalIgnoreCase)
+                 || phoneNumberId.Contains("DEV_ONLY", StringComparison.OrdinalIgnoreCase))
+            wErrors.Add(new CheckError("WhatsApp:MetaCloud:PhoneNumberId", "WhatsApp__MetaCloud__PhoneNumberId",
+                "Meta Cloud phone number ID looks like a placeholder"));
+        if (wErrors.Count > 0)
+            throw new InvalidOperationException(
+                "Refusing to start: WhatsApp provider is set to MetaCloud but its credentials are missing or placeholders.\n  - " +
+                string.Join("\n  - ", wErrors.Select(e => $"{e.Key}: {e.Reason} (env {e.Env})")));
     }
 }
 
