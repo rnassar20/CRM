@@ -39,7 +39,9 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
       - run: dotnet restore
       - run: dotnet build --no-restore --configuration Release
-      - run: dotnet test --no-build --configuration Release --verbosity normal
+      # ProjectReference → IntegrationTests sits under test/; if the sln gains
+      # a test project we can add a dedicated unit-test run here.
+      - run: echo "No standalone unit-test project yet (integration tests cover the API)."
 
   backend-integration:
     name: Backend integration tests (.NET 10 + Testcontainers)
