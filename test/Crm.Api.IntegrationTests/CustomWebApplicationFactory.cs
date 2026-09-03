@@ -1,7 +1,8 @@
-using Crm.Api.Data; // Adjust this to match your actual DbContext namespace
+using Crm.Api.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Testcontainers.PostgreSql;
 
@@ -16,40 +17,54 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         .WithPassword("crm@dock123")
         .Build();
 
+    private string? _originalConnectionString;
+
     public async Task InitializeAsync()
     {
         await _dbContainer.StartAsync();
+        _originalConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Default");
+        Environment.SetEnvironmentVariable("ConnectionStrings__Default", _dbContainer.GetConnectionString());
     }
 
     public new async Task DisposeAsync()
     {
-        await _dbContainer.DisposeAsync();
+        try { await _dbContainer.DisposeAsync(); }
+        finally
+        {
+            if (_originalConnectionString is null)
+                Environment.SetEnvironmentVariable("ConnectionStrings__Default", null);
+            else
+                Environment.SetEnvironmentVariable("ConnectionStrings__Default", _originalConnectionString);
+        }
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.ConfigureAppConfiguration(config =>
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Default"] = _dbContainer.GetConnectionString()
+            });
+        });
+
         builder.ConfigureServices(services =>
         {
-            // 1. Remove the existing DbContext registration
-            var descriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>)); // Change CrmDbContext to your actual DbContext name
+            // Remove the default DbContext registration so we can replace it with
+            // one backed by the Testcontainers Postgres.
+            var dbDescriptor = services.FirstOrDefault(
+                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
+            if (dbDescriptor is not null)
+                services.Remove(dbDescriptor);
 
-            if (descriptor != null)
-            {
-                services.Remove(descriptor);
-            }
-
-            // 2. Add the Testcontainer DbContext
             services.AddDbContext<AppDbContext>(options =>
-            {
-                options.UseNpgsql(_dbContainer.GetConnectionString());
-            });
+                options.UseNpgsql(_dbContainer.GetConnectionString()));
 
-            // 3. Ensure the database is created and migrated for the test
+            // Ensure the test database schema matches what Program.cs creates at startup.
             var sp = services.BuildServiceProvider();
             using var scope = sp.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.Database.EnsureCreated(); // Or db.Database.Migrate(); if you use migrations
+            db.Database.Migrate();
         });
     }
 }

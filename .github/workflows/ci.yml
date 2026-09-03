@@ -11,29 +11,54 @@ env:
   NODE_VERSION: '20.x'
 
 jobs:
-  backend-ci:
-    name: Backend (.NET 10)
+  backend-build:
+    name: Backend build (.NET 10)
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./api
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+      - run: dotnet restore
+      - run: dotnet build --no-restore --configuration Release
 
-      - name: Restore dependencies
-        run: dotnet restore
+  backend-test:
+    name: Backend unit tests (.NET 10)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./api
+    needs: backend-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - run: dotnet restore
+      - run: dotnet build --no-restore --configuration Release
+      - run: dotnet test --no-build --configuration Release --verbosity normal
 
-      - name: Build
-        run: dotnet build --no-restore --configuration Release
-
-      - name: Test
-        run: dotnet test --no-build --configuration Release --verbosity normal
+  backend-integration:
+    name: Backend integration tests (.NET 10 + Testcontainers)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./test/Crm.Api.IntegrationTests
+    needs: backend-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - run: dotnet restore
+      - run: dotnet build --no-restore --configuration Release
+      - run: >
+          dotnet test --no-build --configuration Release --verbosity normal
+          --logger "console;verbosity=normal"
+          --filter "FullyQualifiedName~Crm.Api.IntegrationTests"
 
   frontend-ci:
     name: Frontend (React 19 + Vite)
@@ -42,25 +67,12 @@ jobs:
       run:
         working-directory: ./web
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: ./web/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint (Oxlint)
-        run: npm run lint # Ensure your package.json has "lint": "oxlint"
-
-      # - name: Type Check
-      # Removed 'npx tsc --noEmit' because your 'npm run build' 
-      # already runs 'tsc -b' which checks types and builds!
-
-      - name: Build
-        run: npm run build
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
