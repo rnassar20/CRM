@@ -1,0 +1,64 @@
+using Crm.Api.Data;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Testcontainers.PostgreSql;
+
+namespace Crm.Api.IntegrationTests;
+
+public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
+{
+    private string? _originalConnectionString;
+    private string? _originalJwtSecret;
+    private string? _originalLicenseSecret;
+
+    public Task InitializeAsync()
+    {
+        _originalConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Default");
+        _originalJwtSecret = Environment.GetEnvironmentVariable("Jwt__Secret");
+        _originalLicenseSecret = Environment.GetEnvironmentVariable("Licensing__Secret");
+        Environment.SetEnvironmentVariable("ConnectionStrings__Default",
+            "Host=localhost;Port=5433;Database=crm_db;Username=crm;Password=crm@dock123");
+        Environment.SetEnvironmentVariable("Jwt__Secret",
+            "crm-dev-secret-change-in-production-this-is-68-chars-long-ok!!!");
+        Environment.SetEnvironmentVariable("Licensing__Secret", "test-license-secret-12345");
+        return Task.CompletedTask;
+    }
+
+    public new Task DisposeAsync()
+    {
+        Environment.SetEnvironmentVariable("ConnectionStrings__Default", _originalConnectionString);
+        Environment.SetEnvironmentVariable("Jwt__Secret", _originalJwtSecret);
+        Environment.SetEnvironmentVariable("Licensing__Secret", _originalLicenseSecret);
+        return Task.CompletedTask;
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.ConfigureAppConfiguration(config =>
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Secret"] = "crm-test-jwt-signing-secret-minimum-sixty-four-characters-long-ok!!",
+                ["Jwt:Issuer"] = "crm-api",
+                ["Jwt:Audience"] = "crm-web",
+                ["Jwt:ExpireMinutes"] = "720",
+                ["Testing:AllowPlaceholderSecrets"] = "true"
+            });
+        });
+
+        builder.ConfigureServices(services =>
+        {
+            var dbDescriptor = services.FirstOrDefault(
+                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
+            if (dbDescriptor is not null)
+                services.Remove(dbDescriptor);
+
+            services.AddDbContext<AppDbContext>(options =>
+                options.UseNpgsql(
+                    "Host=localhost;Port=5433;Database=crm_db;Username=crm;Password=crm@dock123"));
+        });
+    }
+}

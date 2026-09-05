@@ -19,11 +19,6 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
     private const int MaxFailedAttempts = 5;
     private static readonly TimeSpan LockoutWindow = TimeSpan.FromMinutes(15);
 
-    /// <summary>
-    /// Brute-force hardened login:
-    ///  - rate-limited by remote IP (Policy "login", 10 requests / 15 min, enforced by middleware),
-    ///  - per-account lockout after 5 failed attempts for 15 minutes (in-memory, resets on restart).
-    /// </summary>
     [HttpPost("login")]
     [EnableRateLimiting("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
@@ -33,18 +28,59 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
         if (cache.TryGetValue(lockKey, out _))
             return LockedOut();
 
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
-        if (user is null || !user.IsActive || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        // Unified model: find person credential by username (email) or by person email
+        var cred = await db.PersonCredentials
+            .Include(c => c.Person)
+            .FirstOrDefaultAsync(c => c.Username == email);
+        if (cred is null)
+            cred = await db.PersonCredentials
+                .Include(c => c.Person)
+                .FirstOrDefaultAsync(c => c.Person != null && c.Person.Email == email);
+        if (cred is null || cred.Person is null || cred.Person.Status != "1"
+            || !BCrypt.Net.BCrypt.Verify(request.Password, cred.PasswordHash))
         {
             RecordFailedAttempt(email);
+            await db.LoginAttempts.AddAsync(new LoginAttempt
+            {
+                PersonId = cred?.PersonId,
+                Email = email,
+                IpAddress = Request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                Success = false,
+                CreatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
             return Unauthorized("Invalid email or password.");
         }
 
-        cache.Remove(lockKey);
-        cache.Remove(FailsKey(email));
-        var (token, expires) = jwt.CreateToken(user);
-        return Ok(new AuthResponse(token, expires,
-            new UserDto(user.Id, user.FullName, user.Email, user.Role.ToString(), user.IsActive, user.CreatedAt)));
+        try
+        {
+            cache.Remove(lockKey);
+            cache.Remove(FailsKey(email));
+            await db.LoginAttempts.AddAsync(new LoginAttempt
+            {
+                PersonId = cred.PersonId,
+                Email = email,
+                IpAddress = Request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                Success = true,
+                CreatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+
+            var userDto = new UserDto(
+                cred.Person.Id,
+                $"{cred.Person.FirstName} {cred.Person.LastName}".Trim(),
+                cred.Person.Email ?? email,
+                cred.AccessLevel == 1 ? "Admin" : "Agent",
+                cred.Person.Status == "1",
+                cred.Person.CreatedAt);
+
+            var (token, expires) = jwt.CreateToken(userDto);
+            return Ok(new AuthResponse(token, expires, userDto));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Internal error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+        }
     }
 
     private void RecordFailedAttempt(string email)
@@ -69,38 +105,54 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
         StatusCode = StatusCodes.Status429TooManyRequests
     };
 
-    /// <summary>
-    /// The very first registered account becomes Admin automatically.
-    /// Afterwards only Admins can create accounts.
-    /// </summary>
     [HttpPost("register")]
     [Authorize]
     public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request)
     {
-        var hasUsers = await db.Users.AnyAsync();
+        var hasUsers = await db.PersonCredentials.AnyAsync();
         var currentRole = User.FindFirstValue("role");
 
-        if (hasUsers && currentRole != UserRole.Admin.ToString())
+        if (hasUsers && currentRole != "Admin")
             return Forbid();
 
         var email = request.Email.Trim().ToLowerInvariant();
-        if (await db.Users.AnyAsync(u => u.Email == email))
+        if (await db.PersonCredentials.AnyAsync(c => c.Username == email))
             return BadRequest("Email already registered.");
 
-        var role = hasUsers ? UserRole.Agent : UserRole.Admin;
-        var user = new User
+        var role = hasUsers ? "Agent" : "Admin";
+        var accessLevel = role == "Admin" ? (short)1 : (short)2;
+
+        // Create person + credential together
+        var person = new Person
         {
-            FullName = request.FullName.Trim(),
+            FirstName = request.FullName.Trim().Split(' ')[0],
+            LastName = string.Join(' ', request.FullName.Trim().Split(' ').Skip(1)),
             Email = email,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-            Role = role
+            Status = "1",
+            PersonType = 11, // Employee
+            ProfileId = 1, // default employee profile (phcyid=1 in ew_profile)
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
         };
-        db.Users.Add(user);
+        db.Persons.Add(person);
         await db.SaveChangesAsync();
 
-        var (token, expires) = jwt.CreateToken(user);
-        return Ok(new AuthResponse(token, expires,
-            new UserDto(user.Id, user.FullName, user.Email, role.ToString(), true, user.CreatedAt)));
+        var cred = new PersonCredential
+        {
+            PersonId = person.Id,
+            Username = email,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+            AccessLevel = accessLevel,
+            MustReset = false,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.PersonCredentials.Add(cred);
+        await db.SaveChangesAsync();
+
+        var userDto = new UserDto(person.Id, request.FullName.Trim(), email, role, true, person.CreatedAt);
+        var (token, expires) = jwt.CreateToken(userDto);
+        return Ok(new AuthResponse(token, expires, userDto));
     }
 
     [HttpGet("me")]
@@ -108,23 +160,35 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
     public async Task<ActionResult<UserDto>> Me()
     {
         var id = User.GetUserId();
-        var user = await db.Users.FindAsync(id);
-        if (user is null) return NotFound();
-        return Ok(new UserDto(user.Id, user.FullName, user.Email, user.Role.ToString(), user.IsActive, user.CreatedAt));
+        var cred = await db.PersonCredentials
+            .Include(c => c.Person)
+            .FirstOrDefaultAsync(c => c.PersonId == id);
+        if (cred is null || cred.Person is null) return NotFound();
+        return Ok(new UserDto(
+            cred.Person.Id,
+            $"{cred.Person.FirstName} {cred.Person.LastName}".Trim(),
+            cred.Person.Email ?? cred.Username,
+            cred.AccessLevel == 1 ? "Admin" : "Agent",
+            cred.Person.Status == "1",
+            cred.Person.CreatedAt));
     }
 
     [HttpPost("change-password")]
     [Authorize]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
     {
-        var user = await db.Users.FindAsync(User.GetUserId());
-        if (user is null) return NotFound();
-        if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash))
+        var id = User.GetUserId();
+        var cred = await db.PersonCredentials
+            .Include(c => c.Person)
+            .FirstOrDefaultAsync(c => c.PersonId == id);
+        if (cred is null || cred.Person is null) return NotFound();
+        if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, cred.PasswordHash))
             return BadRequest("Current password is incorrect.");
         if (request.NewPassword.Length < 8)
             return BadRequest("New password must be at least 8 characters.");
 
-        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+        cred.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+        cred.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return NoContent();
     }

@@ -4,37 +4,20 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Testcontainers.PostgreSql;
 
 namespace Crm.Api.IntegrationTests;
 
-public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
+public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
-    private readonly PostgreSqlContainer _dbContainer = new PostgreSqlBuilder("postgres:16-alpine")
-        .WithDatabase("crm_db")
-        .WithUsername("crm")
-        .WithPassword("crm@dock123")
-        .Build();
-
-    private string? _originalConnectionString;
-
-    public async Task InitializeAsync()
+    static CustomWebApplicationFactory()
     {
-        await _dbContainer.StartAsync();
-        _originalConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Default");
-        Environment.SetEnvironmentVariable("ConnectionStrings__Default", _dbContainer.GetConnectionString());
-    }
-
-    public new async Task DisposeAsync()
-    {
-        try { await _dbContainer.DisposeAsync(); }
-        finally
-        {
-            if (_originalConnectionString is null)
-                Environment.SetEnvironmentVariable("ConnectionStrings__Default", null);
-            else
-                Environment.SetEnvironmentVariable("ConnectionStrings__Default", _originalConnectionString);
-        }
+        Environment.SetEnvironmentVariable("ConnectionStrings__Default",
+            "Host=localhost;Port=5433;Database=crm_db;Username=crm;Password=crm@dock123");
+        Environment.SetEnvironmentVariable("Jwt__Secret",
+            "crm-test-jwt-signing-secret-minimum-sixty-four-characters-long-ok!!");
+        Environment.SetEnvironmentVariable("Licensing__Secret",
+            "baaf945deabc60b9706001bce0898126534aac3bf64b184d");
+        Environment.SetEnvironmentVariable("Testing_SkipSecretValidation", "1");
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -43,27 +26,23 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:Default"] = _dbContainer.GetConnectionString()
+                ["Jwt:Secret"] = "crm-test-jwt-signing-secret-minimum-sixty-four-characters-long-ok!!",
+                ["Jwt:Issuer"] = "crm-api",
+                ["Jwt:Audience"] = "crm-web",
+                ["Jwt:ExpireMinutes"] = "720",
+                ["Licensing:Secret"] = "baaf945deabc60b9706001bce0898126534aac3bf64b184d",
+                ["Testing:AllowPlaceholderSecrets"] = "true"
             });
         });
 
         builder.ConfigureServices(services =>
         {
-            // Remove the default DbContext registration so we can replace it with
-            // one backed by the Testcontainers Postgres.
-            var dbDescriptor = services.FirstOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
+            var dbDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
             if (dbDescriptor is not null)
                 services.Remove(dbDescriptor);
 
             services.AddDbContext<AppDbContext>(options =>
-                options.UseNpgsql(_dbContainer.GetConnectionString()));
-
-            // Ensure the test database schema matches what Program.cs creates at startup.
-            var sp = services.BuildServiceProvider();
-            using var scope = sp.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.Database.Migrate();
+                options.UseNpgsql("Host=localhost;Port=5433;Database=crm_db;Username=crm;Password=crm@dock123"));
         });
     }
 }

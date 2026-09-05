@@ -33,16 +33,19 @@ public class DashboardAuthController(AppDbContext db) : ControllerBase
     public async Task<IActionResult> Login([FromForm] DashboardLoginRequest request, [FromQuery] string? returnUrl = null)
     {
         var email = request.Email.Trim().ToLowerInvariant();
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == email);
-        if (user is null || !user.IsActive || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+        var cred = await db.PersonCredentials
+            .Include(c => c.Person)
+            .FirstOrDefaultAsync(c => c.Username == email);
+        if (cred is null || cred.Person is null || cred.Person.Status != "1"
+            || !BCrypt.Net.BCrypt.Verify(request.Password, cred.PasswordHash))
             return Content(DashboardLoginPage.Html("Invalid email or password."), "text/html");
 
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new(ClaimTypes.Name, user.FullName),
-            new(ClaimTypes.Email, user.Email),
-            new(ClaimTypes.Role, user.Role.ToString())
+            new(ClaimTypes.NameIdentifier, cred.Person.Id.ToString()),
+            new(ClaimTypes.Name, $"{cred.Person.FirstName} {cred.Person.LastName}".Trim()),
+            new(ClaimTypes.Email, cred.Person.Email ?? email),
+            new(ClaimTypes.Role, cred.AccessLevel == 1 ? "Admin" : "Agent")
         };
         await HttpContext.SignInAsync(CookieScheme, new ClaimsPrincipal(new ClaimsIdentity(claims, CookieScheme)));
 

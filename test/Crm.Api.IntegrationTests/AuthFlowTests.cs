@@ -120,6 +120,8 @@ public class AuthFlowTests : IClassFixture<CustomWebApplicationFactory>
     {
         var response = await _authClient.PostAsJsonAsync("/api/auth/login",
             new { email, password });
+        if (response.StatusCode != HttpStatusCode.OK)
+            throw new HttpRequestException($"Login failed: {response.StatusCode} {await response.Content.ReadAsStringAsync()}");
         var body = await response.Content.ReadFromJsonAsync<AuthResponse>();
         return body!.Token;
     }
