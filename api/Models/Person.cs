@@ -149,4 +149,17 @@ public class Person
 
     [InverseProperty("Person")]
     public CrmClientExtension? CrmExtension { get; set; }
+
+    // legacy child entities whose FK still points at persons.id
+    [InverseProperty("Client")]
+    public ICollection<Interaction> Interactions { get; set; } = [];
+
+    [InverseProperty("Client")]
+    public ICollection<FollowUp> FollowUps { get; set; } = [];
+
+    [InverseProperty("Client")]
+    public ICollection<Ticket> Tickets { get; set; } = [];
+
+    [InverseProperty("Client")]
+    public ICollection<Subscription> Subscriptions { get; set; } = [];
 }

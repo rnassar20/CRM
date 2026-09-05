@@ -16,7 +16,7 @@ public class WhatsAppMessage
     public string? ProviderMessageId { get; set; }
     public string? Error { get; set; }
     public int? ClientId { get; set; }
-    public Client? Client { get; set; }
+    public Person? Client { get; set; }
     public int? SubscriptionId { get; set; }
     public Subscription? Subscription { get; set; }
     /// <summary>Dedup/business tag, e.g. "expiry-30", "license-paid".</summary>

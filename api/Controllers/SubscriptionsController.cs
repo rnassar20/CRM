@@ -53,7 +53,8 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
     [HttpPost]
     public async Task<ActionResult<SubscriptionDto>> Create(CreateSubscriptionRequest request)
     {
-        var client = await db.Clients.FirstOrDefaultAsync(c => c.Id == request.ClientId);
+        var client = await db.Persons
+            .FirstOrDefaultAsync(p => p.Id == request.ClientId && p.PersonType == 12);
         if (client is null) return BadRequest($"Client {request.ClientId} not found.");
         var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == request.PlanId && p.IsActive);
         if (plan is null) return BadRequest($"Active plan {request.PlanId} not found.");
@@ -82,9 +83,6 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
             PaymentStatus = PaymentStatus.Unpaid
         };
         db.Subscriptions.Add(sub);
-
-        if (client.Status != ClientStatus.Subscribed)
-            client.Status = ClientStatus.Subscribed;
 
         await db.SaveChangesAsync();
         sub.Client = client;
@@ -130,7 +128,7 @@ public class SubscriptionsController(AppDbContext db, ILicenseKeyService license
         var template = config["WhatsApp:Templates:LicenseDelivered"]
             ?? "Thank you {client}! Your payment for {plan} is confirmed. Activation key:\n{key}\nOpen your ERP > Help > Activate Subscription and enter this key. Licensed until {expiry}.";
         var body = template
-            .Replace("{client}", sub.Client.Name)
+            .Replace("{client}", $"{sub.Client.FirstName} {sub.Client.LastName}".Trim())
             .Replace("{plan}", sub.Plan.Name)
             .Replace("{key}", key)
             .Replace("{expiry}", sub.ExpiryDate.ToString("yyyy-MM-dd"));

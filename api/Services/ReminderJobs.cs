@@ -40,7 +40,7 @@ public class ReminderJobs(IServiceScopeFactory scopeFactory, ILogger<ReminderJob
 
             var tag = $"expiry-{daysLeft}";
             var body = expiryTemplate
-                .Replace("{client}", sub.Client.Name)
+                .Replace("{client}", $"{sub.Client.FirstName} {sub.Client.LastName}".Trim())
                 .Replace("{plan}", sub.Plan.Name)
                 .Replace("{expiry}", sub.ExpiryDate.ToString("yyyy-MM-dd"))
                 .Replace("{days}", daysLeft.ToString());
@@ -189,15 +189,15 @@ public class ReminderJobs(IServiceScopeFactory scopeFactory, ILogger<ReminderJob
     /// Everyone who should receive a client's WhatsApp notifications: the primary contact plus
     /// every secondary contact flagged AllowWhatsApp. Deduplicated by phone number.
     /// </summary>
-    public static IEnumerable<(string Phone, string? Name)> Recipients(Client client)
+    public static IEnumerable<(string Phone, string? Name)> Recipients(Person client)
     {
         if (!string.IsNullOrWhiteSpace(client.Phone))
             yield return (client.Phone.Trim(), null);
 
         foreach (var c in client.Contacts)
         {
-            if (c.AllowWhatsApp && !string.IsNullOrWhiteSpace(c.Phone))
-                yield return (c.Phone.Trim(), c.Name);
+            if (c.Connect == 1 && !string.IsNullOrWhiteSpace(c.Phone))
+                yield return (c.Phone.Trim(), $"{c.FirstName} {c.LastName}".Trim());
         }
     }
 }

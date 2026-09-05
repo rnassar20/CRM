@@ -18,13 +18,17 @@ public class DashboardController(AppDbContext db) : ControllerBase
         var today = DateTime.UtcNow.Date;
         var now = DateTime.Now;
 
-        var clientsByStatus = await db.Clients
-            .GroupBy(c => c.Status)
-            .Select(g => new { Key = g.Key.ToString(), Count = g.Count() })
+        var clientsByStatus = await db.Persons
+            .Where(p => p.PersonType == 12)
+            .Include(p => p.CrmExtension)
+            .GroupBy(p => p.CrmExtension != null ? p.CrmExtension.Status : "Unknown")
+            .Select(g => new { Key = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count);
-        var clientsByType = await db.Clients
-            .GroupBy(c => c.Type)
-            .Select(g => new { Key = g.Key.ToString(), Count = g.Count() })
+        var clientsByType = await db.Persons
+            .Where(p => p.PersonType == 12)
+            .Include(p => p.CrmExtension)
+            .GroupBy(p => p.CrmExtension != null ? p.CrmExtension.ClientType : "Unknown")
+            .Select(g => new { Key = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count);
 
         var ticketsByStatus = await db.Tickets
@@ -55,20 +59,22 @@ public class DashboardController(AppDbContext db) : ControllerBase
         var waSent = await db.WhatsAppMessages
             .CountAsync(m => m.Direction == WhatsAppDirection.Outgoing && m.Status == WhatsAppStatus.Sent && m.CreatedAt >= today.AddDays(-30));
 
+        var clientsTotal = await db.Persons.CountAsync(p => p.PersonType == 12);
+
         return Ok(new DashboardStatsDto(
-            ClientsTotal: await db.Clients.CountAsync(),
-            ClientsByStatus: clientsByStatus,
-            ClientsByType: clientsByType,
-            SubscriptionsActive: subsActive,
-            SubscriptionsExpiringIn30: subsExpiring30,
-            SubscriptionsExpired: subsExpired,
-            SubscriptionsUnpaidActive: subsUnpaidActive,
-            TicketsByStatus: ticketsByStatus,
-            TicketsOpen: ticketsByStatus.GetValueOrDefault(TicketStatus.Open.ToString()) + ticketsByStatus.GetValueOrDefault(TicketStatus.InProgress.ToString()),
-            FollowUpsToday: await db.FollowUps.CountAsync(f => f.Status == FollowUpStatus.Pending && f.ScheduledAt.Date == today),
-            FollowUpsOverdue: await db.FollowUps.CountAsync(f => f.Status == FollowUpStatus.Pending && f.ScheduledAt < now),
-            WhatsAppSentLast30Days: waSent,
-            UpcomingFollowUps: upcoming.Select(f => f.ToDto()).ToList(),
-            RecentInteractions: recent.Select(i => i.ToDto()).ToList()));
+            clientsTotal,
+            clientsByStatus,
+            clientsByType,
+            subsActive,
+            subsExpiring30,
+            subsExpired,
+            subsUnpaidActive,
+            ticketsByStatus,
+            ticketsByStatus.GetValueOrDefault(TicketStatus.Open.ToString()) + ticketsByStatus.GetValueOrDefault(TicketStatus.InProgress.ToString()),
+            await db.FollowUps.CountAsync(f => f.Status == FollowUpStatus.Pending && f.ScheduledAt.Date == today),
+            await db.FollowUps.CountAsync(f => f.Status == FollowUpStatus.Pending && f.ScheduledAt < now),
+            waSent,
+            upcoming.Select(f => f.ToDto()).ToList(),
+            recent.Select(i => i.ToDto()).ToList()));
     }
 }

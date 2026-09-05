@@ -54,7 +54,8 @@ public class InteractionsController(AppDbContext db) : ControllerBase
     [HttpPost]
     public async Task<ActionResult<InteractionCreatedResponse>> Create(CreateInteractionRequest request)
     {
-        var client = await db.Clients.FirstOrDefaultAsync(c => c.Id == request.ClientId);
+        var client = await db.Persons
+            .FirstOrDefaultAsync(p => p.Id == request.ClientId && p.PersonType == 12);
         if (client is null) return BadRequest($"Client {request.ClientId} not found.");
 
         if (!Enum.TryParse<InteractionType>(request.Type, true, out var type) || !ValidTypes.Contains(type))
@@ -87,7 +88,7 @@ public class InteractionsController(AppDbContext db) : ControllerBase
             followUp = new FollowUp
             {
                 ClientId = client.Id,
-                Title = $"Follow-up ({type}): {client.Name}",
+                Title = $"Follow-up ({type}): {client.FirstName} {client.LastName}".Trim(),
                 Description = $"Created from {type} log with outcome '{outcome}'.",
                 ScheduledAt = when,
                 AssignedToId = User.GetUserId(),
@@ -99,25 +100,31 @@ public class InteractionsController(AppDbContext db) : ControllerBase
 
         if (newStatus is { } ns)
         {
-            client.Status = ns;
+            var ext = await db.CrmClientExtensions.FirstOrDefaultAsync(x => x.PersonId == client.Id);
+            if (ext is not null) ext.Status = ns.ToString();
         }
         else if (outcome is InteractionOutcome.DealClosed)
         {
-            client.Status = ClientStatus.Subscribed;
+            var ext = await db.CrmClientExtensions.FirstOrDefaultAsync(x => x.PersonId == client.Id);
+            if (ext is not null) ext.Status = ClientStatus.Subscribed.ToString();
         }
-        else if (client.Status is ClientStatus.Potential or ClientStatus.Contacted)
+        else
         {
-            client.Status = outcome switch
+            var ext = await db.CrmClientExtensions.FirstOrDefaultAsync(x => x.PersonId == client.Id);
+            if (ext is not null && ext.Status is "Potential" or "Contacted")
             {
-                InteractionOutcome.Interested or InteractionOutcome.CallbackRequested => ClientStatus.Interested,
-                InteractionOutcome.NotInterested => ClientStatus.NotInterested,
-                _ => ClientStatus.Contacted
-            };
+                ext.Status = outcome switch
+                {
+                    InteractionOutcome.Interested or InteractionOutcome.CallbackRequested => "Interested",
+                    InteractionOutcome.NotInterested => "NotInterested",
+                    _ => "Contacted"
+                };
+            }
         }
 
         await db.SaveChangesAsync();
         interaction.Client = client;
-        interaction.User = await db.Users.FirstAsync(u => u.Id == interaction.UserId);
+        interaction.User = await db.PersonCredentials.FirstAsync(u => u.Id == interaction.UserId);
 
         return Ok(new InteractionCreatedResponse(interaction.ToDto(), followUp?.Id));
     }

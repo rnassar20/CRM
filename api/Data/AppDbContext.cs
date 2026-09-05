@@ -128,18 +128,41 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             {
                 e.Property(i => i.Type).HasConversion<string>();
                 e.Property(i => i.Outcome).HasConversion<string>();
+                e.HasOne(i => i.Client).WithMany(c => c.Interactions).HasForeignKey(i => i.ClientId);
+                e.HasOne(i => i.User).WithMany().HasForeignKey(i => i.UserId).OnDelete(DeleteBehavior.Restrict);
             });
 
             mb.Entity<FollowUp>(e =>
             {
                 e.Property(f => f.Type).HasConversion<string>();
                 e.Property(f => f.Status).HasConversion<string>();
+                e.HasOne(f => f.Client).WithMany(c => c.FollowUps).HasForeignKey(f => f.ClientId);
+                e.HasOne(f => f.AssignedTo).WithMany().HasForeignKey(f => f.AssignedToId).OnDelete(DeleteBehavior.Restrict);
+                e.HasOne(f => f.CreatedBy).WithMany().HasForeignKey(f => f.CreatedById).OnDelete(DeleteBehavior.Restrict);
+                e.HasOne(f => f.Ticket).WithMany().HasForeignKey(f => f.TicketId);
             });
 
             mb.Entity<Ticket>(e =>
             {
                 e.Property(t => t.Priority).HasConversion<string>();
                 e.Property(t => t.Status).HasConversion<string>();
+                e.HasOne(t => t.Client).WithMany(c => c.Tickets).HasForeignKey(t => t.ClientId);
+                e.HasOne(t => t.AssignedTo).WithMany().HasForeignKey(t => t.AssignedToId).OnDelete(DeleteBehavior.Restrict);
+                e.HasOne(t => t.CreatedBy).WithMany().HasForeignKey(t => t.CreatedById).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            mb.Entity<Subscription>(e =>
+            {
+                e.ToTable("Subscriptions");
+                e.Property(s => s.Cycle).HasConversion<string>();
+                e.Property(s => s.PaymentStatus).HasConversion<string>();
+                e.HasOne(s => s.Client).WithMany(c => c.Subscriptions).HasForeignKey(s => s.ClientId);
+                e.HasOne(s => s.Plan).WithMany().HasForeignKey(s => s.PlanId).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            mb.Entity<TicketComment>(e =>
+            {
+                e.HasOne(c => c.User).WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Restrict);
             });
 
             // User.Role and WhatsAppMessage enum columns are varchar in Postgres.

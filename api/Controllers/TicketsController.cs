@@ -100,7 +100,7 @@ public class TicketsController(AppDbContext db) : ControllerBase
         db.Tickets.Add(ticket);
         await db.SaveChangesAsync();
 
-        ticket.Client = await db.Clients.FirstAsync(c => c.Id == ticket.ClientId);
+        ticket.Client = await db.Persons.FirstAsync(p => p.Id == ticket.ClientId && p.PersonType == 12);
         return CreatedAtAction(nameof(GetById), new { id = ticket.Id }, new { ticket.Id });
     }
 
