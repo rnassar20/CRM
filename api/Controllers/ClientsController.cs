@@ -41,7 +41,7 @@ public class ClientsController(AppDbContext db) : ControllerBase
                 EF.Functions.ILike(p.LastName, $"%{term}%") ||
                 EF.Functions.ILike(p.Phone, $"%{term}%") ||
                 EF.Functions.ILike(p.Email, $"%{term}%") ||
-                EF.Functions.ILike($"{p.FirstName} {p.LastName}", $"%{term}%"));
+                EF.Functions.ILike((p.FirstName ?? "") + " " + (p.LastName ?? ""), $"%{term}%"));
         }
         if (!string.IsNullOrWhiteSpace(type))
             query = query.Where(p => p.CrmExtension != null && p.CrmExtension.ClientType == type);

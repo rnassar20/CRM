@@ -108,6 +108,53 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion<string>();
             mb.Entity<Subscription>().ToTable("Subscriptions");
 
+            // Legacy Client/Interaction/FollowUp/Ticket tables store enum values as
+            // text (varchar) in Postgres, so map enum properties to string explicitly.
+            mb.Entity<Client>(e =>
+            {
+                e.ToTable("Clients");
+                e.Property(c => c.Type).HasConversion<string>();
+                e.Property(c => c.Status).HasConversion<string>();
+            });
+
+            mb.Entity<Subscription>(e =>
+            {
+                e.ToTable("Subscriptions");
+                e.Property(s => s.Cycle).HasConversion<string>();
+                e.Property(s => s.PaymentStatus).HasConversion<string>();
+            });
+
+            mb.Entity<Interaction>(e =>
+            {
+                e.Property(i => i.Type).HasConversion<string>();
+                e.Property(i => i.Outcome).HasConversion<string>();
+            });
+
+            mb.Entity<FollowUp>(e =>
+            {
+                e.Property(f => f.Type).HasConversion<string>();
+                e.Property(f => f.Status).HasConversion<string>();
+            });
+
+            mb.Entity<Ticket>(e =>
+            {
+                e.Property(t => t.Priority).HasConversion<string>();
+                e.Property(t => t.Status).HasConversion<string>();
+            });
+
+            // User.Role and WhatsAppMessage enum columns are varchar in Postgres.
+            mb.Entity<User>(e =>
+            {
+                e.Property(u => u.Role).HasConversion<string>();
+            });
+
+            mb.Entity<WhatsAppMessage>(e =>
+            {
+                e.Property(w => w.MediaType).HasConversion<string>();
+                e.Property(w => w.Direction).HasConversion<string>();
+                e.Property(w => w.Status).HasConversion<string>();
+            });
+
             e.HasIndex(x => x.AppType);
             e.HasIndex(x => x.Email).HasFilter("email IS NOT NULL");
         });

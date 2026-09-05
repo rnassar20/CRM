@@ -3,6 +3,7 @@ using System;
 using Crm.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Crm.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260905171349_LegacyEnumStringConversions")]
+    partial class LegacyEnumStringConversions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1835,9 +1838,8 @@ namespace Crm.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("Role")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("Role")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -1862,16 +1864,14 @@ namespace Crm.Api.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<string>("Direction")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("Direction")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Error")
                         .HasColumnType("text");
 
-                    b.Property<string>("MediaType")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("MediaType")
+                        .HasColumnType("integer");
 
                     b.Property<string>("MediaUrl")
                         .HasColumnType("text");
@@ -1885,9 +1885,8 @@ namespace Crm.Api.Migrations
                     b.Property<DateTime?>("SentAt")
                         .HasColumnType("timestamp without time zone");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
 
                     b.Property<int?>("SubscriptionId")
                         .HasColumnType("integer");
