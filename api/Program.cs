@@ -28,6 +28,7 @@ AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 builder.Services.AddControllers().AddJsonOptions(o =>
 {
     // enums travel as strings ("Pharmacy", "Subscribed", ...) both directions
+    o.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
     o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
