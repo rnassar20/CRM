@@ -5,16 +5,13 @@ namespace Crm.Api.Data;
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
-    // === existing CRM module tables (keep) ===
-    public DbSet<User> Users => Set<User>();
-    public DbSet<Client> Clients => Set<Client>();
+    // === CRM module tables ===
     public DbSet<SubscriptionPlan> Plans => Set<SubscriptionPlan>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<Ticket> Tickets => Set<Ticket>();
     public DbSet<TicketComment> TicketComments => Set<TicketComment>();
     public DbSet<Interaction> Interactions => Set<Interaction>();
     public DbSet<FollowUp> FollowUps => Set<FollowUp>();
-    public DbSet<ClientContact> ClientContacts => Set<ClientContact>();
     public DbSet<WhatsAppMessage> WhatsAppMessages => Set<WhatsAppMessage>();
 
     // === unified person core ===
@@ -108,15 +105,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion<string>();
             mb.Entity<Subscription>().ToTable("Subscriptions");
 
-            // Legacy Client/Interaction/FollowUp/Ticket tables store enum values as
-            // text (varchar) in Postgres, so map enum properties to string explicitly.
-            mb.Entity<Client>(e =>
-            {
-                e.ToTable("Clients");
-                e.Property(c => c.Type).HasConversion<string>();
-                e.Property(c => c.Status).HasConversion<string>();
-            });
-
+            // Interaction/FollowUp/Ticket tables store enum values as text (varchar)
+            // in Postgres, so map enum properties to string explicitly.
             mb.Entity<Subscription>(e =>
             {
                 e.ToTable("Subscriptions");
@@ -165,12 +155,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 e.HasOne(c => c.User).WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Restrict);
             });
 
-            // User.Role and WhatsAppMessage enum columns are varchar in Postgres.
-            mb.Entity<User>(e =>
-            {
-                e.Property(u => u.Role).HasConversion<string>();
-            });
-
+            // WhatsAppMessage enum columns are varchar in Postgres.
             mb.Entity<WhatsAppMessage>(e =>
             {
                 e.Property(w => w.MediaType).HasConversion<string>();

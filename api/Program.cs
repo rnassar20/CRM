@@ -15,7 +15,6 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 
@@ -33,10 +32,7 @@ builder.Services.AddControllers().AddJsonOptions(o =>
 });
 
 builder.Services.AddDbContext<AppDbContext>(o =>
-{
-    o.UseNpgsql(builder.Configuration.GetConnectionString("Default"));
-    o.ConfigureWarnings(warnings => warnings.Log(RelationalEventId.PendingModelChangesWarning));
-});
+    o.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
 var jwt = builder.Configuration.GetSection("Jwt");
 builder.Services

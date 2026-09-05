@@ -19,7 +19,6 @@ public class Subscription
     public int Id { get; set; }
     public int ClientId { get; set; }
     [ForeignKey(nameof(ClientId))]
-    [Column("clientid")]
     public Person Client { get; set; } = null!;
     public int PlanId { get; set; }
     [ForeignKey("PlanId")]

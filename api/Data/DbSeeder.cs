@@ -57,11 +57,11 @@ public static class DbSeeder
 
         var adminPersonId = 0;
 
-        // ---------- admin person + credential (employee, person_type=1) ----------
+        // ---------- admin person + credential (employee, person_type=11) ----------
         var adminPerson = new Person
         {
             ProfileId = crmProfile.Id,
-            PersonType = 1, // Employee
+            PersonType = 11, // Employee
             Title = 4,     // Dr
             FirstName = "System",
             LastName = "Administrator",
@@ -84,7 +84,7 @@ public static class DbSeeder
         };
         db.PersonCredentials.Add(adminCred);
 
-        // ---------- demo clients as persons (person_type=2, CRM profile) ----------
+        // ---------- demo clients as persons (person_type=12, CRM profile) ----------
         var clients = new[]
         {
             new { name = "Al-Shifa Pharmacy", contact = "Ahmed Hassan", phone = "+201****4567", email = "info@alshifa.example", city = "Cairo", type = "Pharmacy", status = "Subscribed", mobile = "+201****4567" },
@@ -98,7 +98,7 @@ public static class DbSeeder
             var person = new Person
             {
                 ProfileId = crmProfile.Id,
-                PersonType = 2, // Client
+                PersonType = 12, // Client
                 Title = c.name.StartsWith("Dr.") ? (short)4 : (short)1,
                 FirstName = c.contact.Split(' ')[0],
                 LastName = string.Join(" ", c.contact.Split(' ').Skip(1)),

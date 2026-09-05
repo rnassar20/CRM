@@ -81,7 +81,7 @@ public class TicketsController(AppDbContext db) : ControllerBase
     [HttpPost]
     public async Task<ActionResult<object>> Create(CreateTicketRequest request)
     {
-        if (!await db.Clients.AnyAsync(c => c.Id == request.ClientId))
+        if (!await db.Persons.AnyAsync(p => p.Id == request.ClientId && p.PersonType == 12))
             return BadRequest($"Client {request.ClientId} not found.");
         var priority = ParsePriority(request.Priority);
         if (priority is null) return BadRequest($"Unknown priority '{request.Priority}'.");
@@ -170,5 +170,6 @@ public class TicketsController(AppDbContext db) : ControllerBase
     private static TicketPriority? ParsePriority(string value)
         => Enum.TryParse<TicketPriority>(value, true, out var p) && ValidPriorities.Contains(p) ? p : null;
 
-    private Task<bool> UserExists(int userId) => db.Users.AnyAsync(u => u.Id == userId && u.IsActive);
+    /// <summary>Staff are persons with PersonType=11 (Employee) who hold a credential.</summary>
+    private Task<bool> UserExists(int personId) => db.Persons.AnyAsync(p => p.Id == personId && p.PersonType == 11);
 }

@@ -57,10 +57,10 @@ public class FollowUpsController(AppDbContext db) : ControllerBase
     [HttpPost]
     public async Task<ActionResult<object>> Create(CreateFollowUpRequest request)
     {
-        if (!await db.Clients.AnyAsync(c => c.Id == request.ClientId))
+        if (!await db.Persons.AnyAsync(p => p.Id == request.ClientId && p.PersonType == 12))
             return BadRequest($"Client {request.ClientId} not found.");
         var assignedToId = request.AssignedToId ?? User.GetUserId();
-        if (!await db.Users.AnyAsync(u => u.Id == assignedToId))
+        if (!await StaffExistsAsync(assignedToId))
             return BadRequest($"User {assignedToId} not found.");
 
         var type = FollowUpType.Marketing;
@@ -129,7 +129,7 @@ public class FollowUpsController(AppDbContext db) : ControllerBase
 
         if (request.AssignedToId is { } uid)
         {
-            if (!await db.Users.AnyAsync(u => u.Id == uid)) return BadRequest($"User {uid} not found.");
+            if (!await StaffExistsAsync(uid)) return BadRequest($"User {uid} not found.");
             followUp.AssignedToId = uid;
         }
 
@@ -156,4 +156,8 @@ public class FollowUpsController(AppDbContext db) : ControllerBase
         await db.SaveChangesAsync();
         return NoContent();
     }
+
+    /// <summary>Staff are persons with PersonType=11 (Employee) who hold a credential.</summary>
+    private Task<bool> StaffExistsAsync(int personId)
+        => db.Persons.AnyAsync(p => p.Id == personId && p.PersonType == 11);
 }

@@ -28,8 +28,8 @@ public static class Mappers
         return string.Join(" ", parts);
     }
 
-    public static string UserDisplayName(this PersonCredential c)
-        => c.Person?.ClientDisplayName() ?? c.Username ?? "?";
+    /// <summary>Staff member's display name (staff are persons with PersonType=11 + a credential).</summary>
+    public static string UserDisplayName(this Person p) => p.ClientDisplayName();
 
     public static PlanDto ToDto(this SubscriptionPlan p) =>
         new(p.Id, p.Name, p.Cycle.ToString(), p.Price, p.IsActive);
@@ -53,9 +53,6 @@ public static class Mappers
             f.Type.ToString(), f.TicketId, f.Ticket?.Title,
             f.ScheduledAt, f.Status.ToString(), f.AssignedToId, f.AssignedTo.UserDisplayName(),
             f.ReminderSentAt, f.CreatedAt);
-
-    public static ClientContactDto ToDto(this ClientContact c) =>
-        new(c.Id, c.ClientId, c.Name, c.Phone, c.Email, c.Notes, c.AllowWhatsApp);
 
     public static TicketCommentDto ToDto(this TicketComment c) =>
         new(c.Id, c.UserId, c.User.UserDisplayName(), c.Body, c.IsInternal, c.CreatedAt);

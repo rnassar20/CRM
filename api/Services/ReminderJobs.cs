@@ -197,7 +197,16 @@ public class ReminderJobs(IServiceScopeFactory scopeFactory, ILogger<ReminderJob
         foreach (var c in client.Contacts)
         {
             if (c.Connect == 1 && !string.IsNullOrWhiteSpace(c.Phone))
-                yield return (c.Phone.Trim(), $"{c.FirstName} {c.LastName}".Trim());
+                yield return (c.Phone.Trim(), NormalizeName(c.FirstName, c.LastName));
         }
+    }
+
+    /// <summary>Joins first/middle/last name parts, dropping blanks so no stray double spaces.</summary>
+    private static string NormalizeName(params string?[] parts)
+    {
+        var joined = new[] { parts[0], parts.ElementAtOrDefault(1) }
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p.Trim());
+        return string.Join(' ', joined);
     }
 }

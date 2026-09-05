@@ -124,7 +124,7 @@ public class InteractionsController(AppDbContext db) : ControllerBase
 
         await db.SaveChangesAsync();
         interaction.Client = client;
-        interaction.User = await db.PersonCredentials.FirstAsync(u => u.Id == interaction.UserId);
+        interaction.User = await db.Persons.FirstAsync(p => p.Id == interaction.UserId && p.PersonType == 11);
 
         return Ok(new InteractionCreatedResponse(interaction.ToDto(), followUp?.Id));
     }

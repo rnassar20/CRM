@@ -10,9 +10,9 @@ public class Ticket
     public TicketPriority Priority { get; set; } = TicketPriority.Medium;
     public TicketStatus Status { get; set; } = TicketStatus.Open;
     public int? AssignedToId { get; set; }
-    public PersonCredential? AssignedTo { get; set; }
+    public Person? AssignedTo { get; set; }
     public int CreatedById { get; set; }
-    public PersonCredential CreatedBy { get; set; } = null!;
+    public Person CreatedBy { get; set; } = null!;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ResolvedAt { get; set; }
@@ -28,7 +28,7 @@ public class TicketComment
     public int TicketId { get; set; }
     public Ticket Ticket { get; set; } = null!;
     public int UserId { get; set; }
-    public PersonCredential User { get; set; } = null!;
+    public Person User { get; set; } = null!;
     public string Body { get; set; } = "";
     public bool IsInternal { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
