@@ -8,13 +8,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace Crm.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache cache) : ControllerBase
+public class AuthController(AppDbContext db, JwtTokenService jwt) : ControllerBase
 {
     private const int MaxFailedAttempts = 5;
     private static readonly TimeSpan LockoutWindow = TimeSpan.FromMinutes(15);
@@ -24,8 +23,7 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
     {
         var email = request.Email.Trim().ToLowerInvariant();
-        var lockKey = $"login-lock:{email}";
-        if (cache.TryGetValue(lockKey, out _))
+        if (await IsLockedOutAsync(email))
             return LockedOut();
 
         // Unified model: find person credential by username (email) or by person email
@@ -39,7 +37,6 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
         if (cred is null || cred.Person is null || cred.Person.Status != "1"
             || !BCrypt.Net.BCrypt.Verify(request.Password, cred.PasswordHash))
         {
-            RecordFailedAttempt(email);
             await db.LoginAttempts.AddAsync(new LoginAttempt
             {
                 PersonId = cred?.PersonId,
@@ -52,8 +49,6 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
             return Unauthorized("Invalid email or password.");
         }
 
-        cache.Remove(lockKey);
-        cache.Remove(FailsKey(email));
         await db.LoginAttempts.AddAsync(new LoginAttempt
         {
             PersonId = cred.PersonId,
@@ -73,25 +68,53 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
             cred.Person.CreatedAt);
 
         var (token, expires) = jwt.CreateToken(userDto);
+
+        // Deliver the access token as an HttpOnly cookie so the SPA never stores it in
+        // JavaScript-accessible storage (localStorage is XSS-exposed). The JWT bearer
+        // middleware reads it from the `crm_access` cookie; the Authorization header stays
+        // supported for API/desktop clients.
+        Response.Cookies.Append("crm_access", token, new CookieOptions
+        {
+            HttpOnly = true,
+            SameSite = SameSiteMode.Lax,
+            Secure = Request.IsHttps,
+            IsEssential = true,
+            Expires = expires,
+            Path = "/"
+        });
+
         return Ok(new AuthResponse(token, expires, userDto));
     }
 
-    private void RecordFailedAttempt(string email)
+    /// <summary>
+    /// DB-backed account lockout (not in-memory): a login is refused when there have been >=
+    /// <see cref="MaxFailedAttempts"/> consecutive failed attempts within <see cref="LockoutWindow"/>.
+    /// Because it reads the persistent <see cref="LoginAttempt"/> rows rather than a process-local
+    /// cache, the lockout survives restarts and holds across multiple app instances.
+    /// </summary>
+    private async Task<bool> IsLockedOutAsync(string email)
     {
-        var failsKey = FailsKey(email);
-        var attempts = cache.GetOrCreate(failsKey, e =>
+        var cutoff = DateTime.UtcNow.Subtract(LockoutWindow);
+        var recentFailures = await db.LoginAttempts
+            .Where(a => a.Email == email && a.CreatedAt >= cutoff && !a.Success)
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync();
+
+        if (recentFailures.Count >= MaxFailedAttempts)
+            return true;
+
+        // A successful login between failures resets the streak.
+        if (recentFailures.Count > 0)
         {
-            e.SetAbsoluteExpiration(LockoutWindow);
-            return 0;
-        });
-        attempts++;
-        cache.Set(failsKey, attempts, LockoutWindow);
+            var latestFailure = recentFailures.Max(a => a.CreatedAt);
+            var anySuccessSince = await db.LoginAttempts
+                .AnyAsync(a => a.Email == email && a.Success && a.CreatedAt > latestFailure);
+            if (anySuccessSince)
+                return false;
+        }
 
-        if (attempts >= MaxFailedAttempts)
-            cache.Set($"login-lock:{email}", true, LockoutWindow);
+        return recentFailures.Count >= MaxFailedAttempts;
     }
-
-    private static string FailsKey(string email) => $"login-fails:{email}";
 
     private ActionResult LockedOut() => new ObjectResult("Too many failed attempts. Please try again later.")
     {
@@ -183,6 +206,21 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
         cred.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
         cred.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    /// <summary>Clears the HttpOnly access cookie so the browser forgets the session.</summary>
+    [HttpPost("logout")]
+    [Authorize]
+    public IActionResult Logout()
+    {
+        Response.Cookies.Delete("crm_access", new CookieOptions
+        {
+            HttpOnly = true,
+            SameSite = SameSiteMode.Lax,
+            Secure = Request.IsHttps,
+            Path = "/"
+        });
         return NoContent();
     }
 }

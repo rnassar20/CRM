@@ -40,6 +40,18 @@ builder.Services
     .AddJwtBearer(o =>
     {
         o.MapInboundClaims = false; // keep raw claim types: sub / name / role
+        // Accept the JWT from an Authorization: Bearer header OR (preferred for the browser SPA,
+        // to keep it out of localStorage and therefore out of reach of XSS) an HttpOnly cookie.
+        o.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = ctx =>
+            {
+                var accessToken = ctx.Request.Cookies["crm_access"];
+                if (!string.IsNullOrEmpty(accessToken) && string.IsNullOrEmpty(ctx.Token))
+                    ctx.Token = accessToken;
+                return Task.CompletedTask;
+            }
+        };
         o.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,

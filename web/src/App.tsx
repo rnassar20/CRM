@@ -11,7 +11,8 @@ import TicketsPage from './pages/TicketsPage'
 import UsersPage from './pages/UsersPage'
 
 function Protected({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
+  if (loading) return <div className="page-body"><div className="muted">Loading…</div></div>
   return user ? <>{children}</> : <Navigate to="/login" replace />
 }
 

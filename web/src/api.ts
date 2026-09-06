@@ -1,19 +1,15 @@
 import axios from 'axios'
 
-export const api = axios.create({ baseURL: '/api' })
+// Same-origin (served behind the same host/nginx or the Vite /api proxy), so we send the
+// HttpOnly auth cookie rather than storing the JWT in localStorage (which is XSS-exposed).
+export const api = axios.create({ baseURL: '/api', withCredentials: true })
 
-api.interceptors.request.use((cfg) => {
-  const token = localStorage.getItem('crm_token')
-  if (token) cfg.headers.Authorization = `Bearer ${token}`
-  return cfg
-})
+api.interceptors.request.use((cfg) => cfg)
 
 api.interceptors.response.use(
   (r) => r,
   (error) => {
     if (error.response?.status === 401 && window.location.pathname !== '/login') {
-      localStorage.removeItem('crm_token')
-      localStorage.removeItem('crm_user')
       window.location.href = '/login'
     }
     return Promise.reject(error)
