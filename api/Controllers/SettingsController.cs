@@ -16,12 +16,14 @@ public class SettingsController(AppDbContext db) : ControllerBase
     [HttpGet("categories")]
     public async Task<ActionResult<IReadOnlyList<SettingCategoryDto>>> GetCategories()
     {
+        // GroupBy().Count() is translatable, but the record constructor is not — so select into an
+        // anonymous shape and map to the DTO in memory.
         var cats = await db.EwSets.AsNoTracking()
             .GroupBy(e => e.Page)
-            .Select(g => new SettingCategoryDto(g.Key, g.Count()))
+            .Select(g => new { Page = g.Key, Count = g.Count() })
             .OrderBy(c => c.Page)
             .ToListAsync();
-        return Ok(cats);
+        return Ok(cats.Select(c => new SettingCategoryDto(c.Page, c.Count)).ToList());
     }
 
     /// <summary>All settings in a category, each with its derived "used" flag (linked by any plan).</summary>
@@ -218,12 +220,13 @@ public class SettingsController(AppDbContext db) : ControllerBase
     {
         var exists = await db.EwSets.AnyAsync(e => e.Page == page && e.Pscode == pscode);
         if (!exists) return NotFound();
+        // Join into an anonymous shape (translatable), then map to the DTO in memory.
         var links = await db.PlanSettings.AsNoTracking()
             .Where(ps => ps.Page == page && ps.Pscode == pscode)
-            .Join(db.Plans.AsNoTracking(), ps => ps.PlanId, p => p.Id, (ps, p) => new PlanOptionDto(p.Id, p.Name))
-            .OrderBy(p => p.PlanName)
+            .Join(db.Plans.AsNoTracking(), ps => ps.PlanId, p => p.Id, (ps, p) => new { p.Id, p.Name })
+            .OrderBy(x => x.Name)
             .ToListAsync();
-        return Ok(links);
+        return Ok(links.Select(x => new PlanOptionDto(x.Id, x.Name)).ToList());
     }
 
     /// <summary>Link a settings item to a plan.</summary>
