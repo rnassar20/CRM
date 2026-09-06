@@ -9,6 +9,10 @@ import type {
   FollowUpDto,
   PagedResult,
   PlanDto,
+  PlanOptionDto,
+  SaveSettingRequest,
+  SettingCategoryDto,
+  SettingDto,
   SubscriptionDto,
   TicketCommentDto,
   TicketDto,
@@ -28,6 +32,10 @@ export const qk = {
   followups: (params: Record<string, unknown>) => ['followups', params] as const,
   dashboard: ['dashboard'] as const,
   users: ['users'] as const,
+  settingCategories: ['setting-categories'] as const,
+  settings: (page: string) => ['settings', page] as const,
+  planSettings: (planId: number) => ['plan-settings', planId] as const,
+  linkedPlans: (page: string, pscode: string) => ['linked-plans', page, pscode] as const,
 }
 
 // ---------- misc hooks ----------
@@ -124,6 +132,100 @@ export function useCreateUser() {
     mutationFn: (body: { fullName: string; email: string; password: string; role: string }) =>
       apiPost<void>('/users', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.users }),
+  })
+}
+
+// ---------- settings (ew_set) ----------
+
+export function useSettingCategories() {
+  return useQuery({
+    queryKey: qk.settingCategories,
+    queryFn: () => apiGet<SettingCategoryDto[]>('/settings/categories'),
+  })
+}
+
+export function useSettings(page: string) {
+  return useQuery({
+    queryKey: qk.settings(page),
+    queryFn: () => apiGet<SettingDto[]>('/settings', { page: page || undefined }),
+    placeholderData: (prev) => prev,
+  })
+}
+
+export function useCreateSetting() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ page, body }: { page: string; body: SaveSettingRequest }) =>
+      apiPost<SettingDto>(`/settings?page=${encodeURIComponent(page)}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.settingCategories })
+      qc.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+}
+
+export function useUpdateSetting() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ page, pscode, body }: { page: string; pscode: string; body: SaveSettingRequest }) =>
+      apiPut<void>(`/settings/${encodeURIComponent(page)}/${encodeURIComponent(pscode)}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      qc.invalidateQueries({ queryKey: ['linked-plans'] })
+    },
+  })
+}
+
+export function useToggleSetting() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ page, pscode, active }: { page: string; pscode: string; active: boolean }) =>
+      apiPatch<void>(`/settings/${encodeURIComponent(page)}/${encodeURIComponent(pscode)}/status`, active),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
+  })
+}
+
+export function useDeleteSetting() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ page, pscode }: { page: string; pscode: string }) =>
+      apiDelete<void>(`/settings/${encodeURIComponent(page)}/${encodeURIComponent(pscode)}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.settingCategories })
+      qc.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+}
+
+/** All plans (including inactive) for the plan-linking modal. */
+export function useAllPlans() {
+  return useQuery({
+    queryKey: qk.plans,
+    queryFn: () => apiGet<PlanDto[]>('/plans', { includeInactive: true }),
+  })
+}
+
+/** The plans currently linked to a single settings item. */
+export function useLinkedPlans(page: string, pscode: string) {
+  return useQuery({
+    queryKey: qk.linkedPlans(page, pscode),
+    queryFn: () => apiGet<PlanOptionDto[]>(`/settings/${encodeURIComponent(page)}/${encodeURIComponent(pscode)}/plans`),
+  })
+}
+
+/** Link / unlink a settings item to a plan. */
+export function useSetPlanLink() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ page, pscode, planId, link }: { page: string; pscode: string; planId: number; link: boolean }) =>
+      link
+        ? apiPost<void>(`/settings/${encodeURIComponent(page)}/${encodeURIComponent(pscode)}/plans/${planId}`)
+        : apiDelete<void>(`/settings/${encodeURIComponent(page)}/${encodeURIComponent(pscode)}/plans/${planId}`),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['linked-plans'] })
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      qc.invalidateQueries({ queryKey: qk.linkedPlans(vars.page, vars.pscode) })
+    },
   })
 }
 

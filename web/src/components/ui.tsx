@@ -25,6 +25,8 @@ const badgeClassMap: Record<string, string> = {
   High: 'badge-amber',
   Overdue: 'badge-red',
   // blues
+  Used: 'badge-blue',
+  free: 'badge-gray',
   Open: 'badge-blue',
   Contacted: 'badge-blue',
   CallbackRequested: 'badge-blue',

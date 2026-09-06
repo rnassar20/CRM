@@ -206,6 +206,39 @@ export interface DashboardStats {
   recentInteractions: InteractionDto[]
 }
 
+// ---------- settings (ew_set) ----------
+
+export interface SettingDto {
+  page: string
+  pscode: string
+  uscode: string | null
+  description: string | null
+  active: boolean
+  usref: number | null
+  descref: number | null
+  /** whether any subscription plan is linked to this setting (blocks deletion) */
+  isUsed: boolean
+}
+
+export interface SettingCategoryDto {
+  page: string
+  count: number
+}
+
+export interface PlanOptionDto {
+  planId: number
+  planName: string
+}
+
+export interface SaveSettingRequest {
+  pscode: string
+  uscode: string | null
+  description: string | null
+  active: boolean | null
+  usref: number | null
+  descref: number | null
+}
+
 // ---------- helpers ----------
 
 export function fmtDate(iso: string | null | undefined): string {

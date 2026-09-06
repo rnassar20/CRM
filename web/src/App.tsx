@@ -6,6 +6,7 @@ import ClientDetailPage from './pages/ClientDetailPage'
 import ClientsPage from './pages/ClientsPage'
 import DashboardPage from './pages/DashboardPage'
 import LoginPage from './pages/LoginPage'
+import SettingsPage from './pages/SettingsPage'
 import SubscriptionsPage from './pages/SubscriptionsPage'
 import TicketsPage from './pages/TicketsPage'
 import UsersPage from './pages/UsersPage'
@@ -40,6 +41,14 @@ export default function App() {
             element={
               <AdminOnly>
                 <UsersPage />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="settings"
+            element={
+              <AdminOnly>
+                <SettingsPage />
               </AdminOnly>
             }
           />

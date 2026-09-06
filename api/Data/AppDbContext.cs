@@ -43,6 +43,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // === lookup ===
     public DbSet<EwSet> EwSets => Set<EwSet>();
 
+    // plan ↔ settings link (keeps Subscription/SubscriptionPlan tables untouched)
+    public DbSet<PlanSetting> PlanSettings => Set<PlanSetting>();
+
     protected override void OnModelCreating(ModelBuilder mb)
     {
         base.OnModelCreating(mb);
@@ -58,6 +61,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Status).HasColumnName("status");
             e.Property(x => x.Usref).HasColumnName("usref");
             e.Property(x => x.Descref).HasColumnName("descref");
+        });
+
+        // --- plan_settings (junction between SubscriptionPlan and ew_set) ---
+        mb.Entity<PlanSetting>(e =>
+        {
+            e.HasKey(x => new { x.PlanId, x.Page, x.Pscode });
+            e.Property(x => x.PlanId).HasColumnName("plan_id");
+            e.Property(x => x.Page).HasMaxLength(5).HasColumnName("page");
+            e.Property(x => x.Pscode).HasMaxLength(5).HasColumnName("pscode");
+            e.HasOne(x => x.Plan)
+                .WithMany()
+                .HasForeignKey(x => x.PlanId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // --- profile (existing table, extend with app_type) ---

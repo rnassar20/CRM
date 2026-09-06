@@ -26,9 +26,14 @@ export default function Layout() {
             </NavLink>
           ))}
           {user?.role === 'Admin' && (
-            <NavLink to="/users" className={({ isActive }) => (isActive ? 'active' : '')}>
-              Users
-            </NavLink>
+            <>
+              <NavLink to="/users" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Users
+              </NavLink>
+              <NavLink to="/settings" className={({ isActive }) => (isActive ? 'active' : '')}>
+                Settings
+              </NavLink>
+            </>
           )}
         </nav>
         <div className="sidebar-foot">v1.0</div>
