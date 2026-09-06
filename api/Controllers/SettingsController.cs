@@ -30,15 +30,30 @@ public class SettingsController(AppDbContext db) : ControllerBase
     {
         var query = db.EwSets.AsNoTracking().AsQueryable();
         if (!string.IsNullOrWhiteSpace(page)) query = query.Where(e => e.Page == page.Trim());
-        // A setting is "in use" when at least one plan links to it.
-        var items = await query
-            .Select(e => new SettingDto(
-                e.Page, e.Pscode, e.Uscode, e.Description,
-                e.Status != null && e.Status != 0,
-                e.Usref, e.Descref,
-                db.PlanSettings.Any(ps => ps.Page == e.Page && ps.Pscode == e.Pscode)))
+
+        // Project into an anonymous type (EF-translatable), then map to the DTO in memory.
+        // Two round-trips but guaranteed translatable and keeps the "used" check simple.
+        var rows = await query
             .OrderBy(e => e.Page).ThenBy(e => e.Pscode)
+            .Select(e => new
+            {
+                e.Page, e.Pscode, e.Uscode, e.Description,
+                Active = e.Status != null && e.Status != 0,
+                e.Usref, e.Descref
+            })
             .ToListAsync();
+
+        var usedKeys = new HashSet<string>(
+            await db.PlanSettings.AsNoTracking()
+                .Select(ps => ps.Page + ":" + ps.Pscode)
+                .ToListAsync());
+
+        var items = rows
+            .Select(x => new SettingDto(
+                x.Page, x.Pscode, x.Uscode, x.Description, x.Active,
+                x.Usref, x.Descref,
+                usedKeys.Contains(x.Page + ":" + x.Pscode)))
+            .ToList();
         return Ok(items);
     }
 
