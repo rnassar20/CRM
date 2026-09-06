@@ -52,35 +52,28 @@ public class AuthController(AppDbContext db, JwtTokenService jwt, IMemoryCache c
             return Unauthorized("Invalid email or password.");
         }
 
-        try
+        cache.Remove(lockKey);
+        cache.Remove(FailsKey(email));
+        await db.LoginAttempts.AddAsync(new LoginAttempt
         {
-            cache.Remove(lockKey);
-            cache.Remove(FailsKey(email));
-            await db.LoginAttempts.AddAsync(new LoginAttempt
-            {
-                PersonId = cred.PersonId,
-                Email = email,
-                IpAddress = Request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                Success = true,
-                CreatedAt = DateTime.UtcNow
-            });
-            await db.SaveChangesAsync();
+            PersonId = cred.PersonId,
+            Email = email,
+            IpAddress = Request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            Success = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
 
-            var userDto = new UserDto(
-                cred.Person.Id,
-                $"{cred.Person.FirstName} {cred.Person.LastName}".Trim(),
-                cred.Person.Email ?? email,
-                cred.AccessLevel == 1 ? "Admin" : "Agent",
-                cred.Person.Status == "1",
-                cred.Person.CreatedAt);
+        var userDto = new UserDto(
+            cred.Person.Id,
+            $"{cred.Person.FirstName} {cred.Person.LastName}".Trim(),
+            cred.Person.Email ?? email,
+            cred.AccessLevel == 1 ? "Admin" : "Agent",
+            cred.Person.Status == "1",
+            cred.Person.CreatedAt);
 
-            var (token, expires) = jwt.CreateToken(userDto);
-            return Ok(new AuthResponse(token, expires, userDto));
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, $"Internal error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
-        }
+        var (token, expires) = jwt.CreateToken(userDto);
+        return Ok(new AuthResponse(token, expires, userDto));
     }
 
     private void RecordFailedAttempt(string email)

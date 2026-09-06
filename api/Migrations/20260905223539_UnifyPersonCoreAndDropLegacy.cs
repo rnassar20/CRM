@@ -1,6 +1,5 @@
 using System;
 using Microsoft.EntityFrameworkCore.Migrations;
-using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
@@ -11,35 +10,16 @@ namespace Crm.Api.Migrations
     {
         /// <inheritdoc />
         /// <remarks>
-        /// ⚠️ DATA LOSS: this migration repoints all CRM FKs from the legacy
-        /// `Clients` / `Users` tables to the unified `persons` table, then DROPS
-        /// `ClientContacts`, `Clients` and `Users`.
+        /// SAFE / NON-DESTRUCTIVE: this migration repoints all CRM FKs from the legacy
+        /// `Clients` / `Users` tables to the unified `persons` table, then RENAMES the legacy
+        /// `ClientContacts`, `Clients` and `Users` tables to `*_TOBEDELETED` (instead of dropping
+        /// them). This preserves any existing data so it can be audited / reconciled before a
+        /// later, manual cleanup deletes those tables.
         ///
-        /// The CRM never writes these legacy tables anymore (staff are `persons` PersonType=11 +
-        /// `person_credentials`; clients are `persons` PersonType=12 + `crm_client_extension`),
-        /// so on a freshly seeded DB there is nothing to lose. If a database still holds
-        /// meaningful rows in `Clients`/`Users`, run the data migration below BEFORE applying
-        /// this migration (or comment out the three DropTable calls to keep the tables):
-        ///
-        ///   -- 1) legacy clients -> persons (PersonType=12) + crm_client_extension
-        ///   INSERT INTO persons (profile_id, person_type, first_name, phone, email,
-        ///                         status, created_at, updated_at)
-        ///   SELECT 1, 12, c."Name", c."Phone", c."Email", '1', now(), now()
-        ///   FROM "Clients" c
-        ///   WHERE NOT EXISTS (SELECT 1 FROM persons p WHERE p.first_name = c."Name" AND p.person_type = 12);
-        ///   INSERT INTO crm_client_extension (person_id, status, client_type, created_at, updated_at)
-        ///   SELECT p.id, c."Status"::text, c."Type"::text, now(), now()
-        ///   FROM "Clients" c JOIN persons p ON p.person_type = 12 AND p.first_name = c."Name";
-        ///
-        ///   -- 2) legacy users -> persons (PersonType=11) + person_credentials
-        ///   INSERT INTO persons (profile_id, person_type, first_name, email, status, created_at, updated_at)
-        ///   SELECT 1, 11, u."FullName", u."Email", '1', now(), now()
-        ///   FROM "Users" u WHERE NOT EXISTS (SELECT 1 FROM persons p WHERE p.email = u."Email");
-        ///   INSERT INTO person_credentials (person_id, username, password_hash, access_level,
-        ///                                    must_reset, created_at, updated_at)
-        ///   SELECT p.id, u."Email", u."PasswordHash",
-        ///          CASE WHEN u."Role" = 'Admin' THEN 1 ELSE 2 END, false, now(), now()
-        ///   FROM "Users" u JOIN persons p ON p.email = u."Email";
+        /// The CRM never reads or writes these legacy tables anymore (staff are `persons`
+        /// PersonType=11 + `person_credentials`; clients are `persons` PersonType=12 +
+        /// `crm_client_extension`), so they are inert after this migration. Delete the
+        /// `*_TOBEDELETED` tables once their contents have been verified.
         /// </remarks>
         protected override void Up(MigrationBuilder migrationBuilder)
         {
@@ -87,14 +67,18 @@ namespace Crm.Api.Migrations
                 name: "FK_WhatsAppMessages_Clients_ClientId",
                 table: "WhatsAppMessages");
 
-            migrationBuilder.DropTable(
-                name: "ClientContacts");
+            // Preserve (don't drop) the legacy tables; mark them for eventual manual cleanup.
+            migrationBuilder.RenameTable(
+                name: "ClientContacts",
+                newName: "ClientContacts_TOBEDELETED");
 
-            migrationBuilder.DropTable(
-                name: "Clients");
+            migrationBuilder.RenameTable(
+                name: "Clients",
+                newName: "Clients_TOBEDELETED");
 
-            migrationBuilder.DropTable(
-                name: "Users");
+            migrationBuilder.RenameTable(
+                name: "Users",
+                newName: "Users_TOBEDELETED");
 
             migrationBuilder.CreateIndex(
                 name: "IX_FollowUps_CreatedById",
@@ -252,87 +236,18 @@ namespace Crm.Api.Migrations
                 name: "IX_FollowUps_CreatedById",
                 table: "FollowUps");
 
-            migrationBuilder.CreateTable(
-                name: "Users",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    Email = table.Column<string>(type: "text", nullable: false),
-                    FullName = table.Column<string>(type: "text", nullable: false),
-                    IsActive = table.Column<bool>(type: "boolean", nullable: false),
-                    PasswordHash = table.Column<string>(type: "text", nullable: false),
-                    Role = table.Column<string>(type: "text", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Users", x => x.Id);
-                });
+            // Restore the legacy table names (contents were preserved, never dropped).
+            migrationBuilder.RenameTable(
+                name: "ClientContacts_TOBEDELETED",
+                newName: "ClientContacts");
 
-            migrationBuilder.CreateTable(
-                name: "Clients",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    CreatedById = table.Column<int>(type: "integer", nullable: false),
-                    Address = table.Column<string>(type: "text", nullable: true),
-                    City = table.Column<string>(type: "text", nullable: true),
-                    ContactPerson = table.Column<string>(type: "text", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    Email = table.Column<string>(type: "text", nullable: true),
-                    Name = table.Column<string>(type: "text", nullable: false),
-                    Notes = table.Column<string>(type: "text", nullable: true),
-                    Phone = table.Column<string>(type: "text", nullable: false),
-                    Status = table.Column<string>(type: "text", nullable: false),
-                    Type = table.Column<string>(type: "text", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Clients", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Clients_Users_CreatedById",
-                        column: x => x.CreatedById,
-                        principalTable: "Users",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
+            migrationBuilder.RenameTable(
+                name: "Clients_TOBEDELETED",
+                newName: "Clients");
 
-            migrationBuilder.CreateTable(
-                name: "ClientContacts",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    ClientId = table.Column<int>(type: "integer", nullable: false),
-                    AllowWhatsApp = table.Column<bool>(type: "boolean", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp without time zone", nullable: false),
-                    Email = table.Column<string>(type: "text", nullable: true),
-                    Name = table.Column<string>(type: "text", nullable: false),
-                    Notes = table.Column<string>(type: "text", nullable: true),
-                    Phone = table.Column<string>(type: "text", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ClientContacts", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_ClientContacts_Clients_ClientId",
-                        column: x => x.ClientId,
-                        principalTable: "Clients",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
-                });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_ClientContacts_ClientId",
-                table: "ClientContacts",
-                column: "ClientId");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Clients_CreatedById",
-                table: "Clients",
-                column: "CreatedById");
+            migrationBuilder.RenameTable(
+                name: "Users_TOBEDELETED",
+                newName: "Users");
 
             migrationBuilder.AddForeignKey(
                 name: "FK_FollowUps_Clients_ClientId",

@@ -134,10 +134,18 @@ builder.Services.AddProblemDetails();
 builder.Services.AddMemoryCache();
 
 const string CorsPolicy = "web";
+// Allowed origins come from configuration (comma-separated) so each environment can be
+// tightened explicitly. Falls back to the local dev frontend for convenience only.
+var allowedOrigins = (builder.Configuration["Cors:AllowedOrigins"] ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+if (allowedOrigins.Length == 0)
+    allowedOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
+
 builder.Services.AddCors(o => o.AddPolicy(CorsPolicy, p => p
-    .WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
-    .AllowAnyHeader()
-    .AllowAnyMethod()));
+    .WithOrigins(allowedOrigins)
+    .WithMethods("GET", "POST", "PUT", "PATCH", "DELETE")
+    .WithHeaders("Authorization", "Content-Type")
+    .AllowCredentials()));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -227,6 +235,15 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors(CorsPolicy);
+
+// Force HTTPS and send HSTS in production. In development we keep plain HTTP because
+// the local Kestrel instance isn't served over TLS and this would 307-loop.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
+
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
